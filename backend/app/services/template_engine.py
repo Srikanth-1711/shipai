@@ -352,71 +352,121 @@ def _generate_multi_agent(output_path: Path, config: dict) -> list[str]:
     """Generate a multi-agent system project."""
     files = []
 
+    llm_provider = config.get("llm_provider", "ollama")
+    if llm_provider == "openai":
+        llm_init = 'from langchain_openai import ChatOpenAI\nllm = ChatOpenAI(model="gpt-4o-mini", temperature=0)'
+    elif llm_provider == "anthropic":
+        llm_init = 'from langchain_anthropic import ChatAnthropic\nllm = ChatAnthropic(model="claude-3-haiku-20240307", temperature=0)'
+    else:
+        llm_init = f'from langchain_community.chat_models import ChatOllama\nllm = ChatOllama(model="{config.get("model", "llama3")}", temperature=0)'
+
+    # 1. Generate mcp_client.py
+    mcp_code = '''"""Model Context Protocol (MCP) Client Stub."""
+import asyncio
+
+class MCPClient:
+    """Connects to external MCP servers to fetch dynamic tool schemas and context."""
+    def __init__(self, server_url: str):
+        self.server_url = server_url
+        self.connected = False
+        
+    async def connect(self):
+        self.connected = True
+        return {"status": "connected", "tools_available": ["read_confluence", "query_jira"]}
+        
+    async def call_tool(self, tool_name: str, args: dict):
+        if not self.connected: raise Exception("MCP Not connected")
+        return f"Simulated output from MCP tool {tool_name}"
+'''
+    mcp_path = output_path / "mcp_client.py"
+    mcp_path.write_text(mcp_code, encoding="utf-8")
+    files.append(str(mcp_path))
+
+    # 2. Generate tools.py
+    tools_code = '''"""Local Python Tools for Agents."""
+from langchain_core.tools import tool
+
+@tool
+def web_search(query: str) -> str:
+    """Search the web for information."""
+    return f"Simulated search results for: {query}"
+
+@tool
+def calculate_math(expression: str) -> str:
+    """Calculate basic math expressions."""
+    try:
+        return str(eval(expression))
+    except Exception as e:
+        return f"Error calculating: {e}"
+
+AVAILABLE_TOOLS = [web_search, calculate_math]
+'''
+    tools_path = output_path / "tools.py"
+    tools_path.write_text(tools_code, encoding="utf-8")
+    files.append(str(tools_path))
+
+    # 3. Generate main.py
     main_code = f'''"""
 {config.get("project_name", "Multi-Agent System")} — Powered by ShipAI
-Orchestrated multi-agent workflow with monitoring.
+Orchestrated LangGraph workflow with MCP capabilities.
 """
 import os
-import json
+from typing import Annotated, Sequence, TypedDict
 from fastapi import FastAPI
 from pydantic import BaseModel
-import httpx
+from langchain_core.messages import BaseMessage, HumanMessage
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+
+# Tools and MCP
+from tools import AVAILABLE_TOOLS
+from mcp_client import MCPClient
+
+{llm_init}
+llm_with_tools = llm.bind_tools(AVAILABLE_TOOLS)
 
 app = FastAPI(title="{config.get("project_name", "Multi-Agent System")}")
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "{config.get("model", "tinyllama")}")
+# Graph State
+class AgentState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], "messages"]
 
+# Node logic
+def agent_node(state: AgentState):
+    """The central agent node that decides to answer or call a tool."""
+    response = llm_with_tools.invoke(state["messages"])
+    return {{"messages": [response]}}
+
+# Build LangGraph
+workflow = StateGraph(AgentState)
+workflow.add_node("agent", agent_node)
+workflow.add_node("tools", ToolNode(AVAILABLE_TOOLS))
+workflow.set_entry_point("agent")
+
+# Edges
+def should_continue(state: AgentState):
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "tools"
+    return END
+
+workflow.add_conditional_edges("agent", should_continue)
+workflow.add_edge("tools", "agent")
+app_graph = workflow.compile()
 
 class AgentTask(BaseModel):
     task: str
-    agents: list[str] = ["researcher", "analyzer", "writer"]
-
-
-async def run_agent(name: str, role: str, task: str, context: str = "") -> str:
-    """Run a single agent with its role."""
-    prompt = f"""You are the {{name}} agent. Your role: {{role}}
-    
-Task: {{task}}
-Previous context: {{context}}
-
-Provide your output:"""
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{{OLLAMA_URL}}/api/generate",
-            json={{"model": MODEL, "prompt": prompt, "stream": False}},
-            timeout=120,
-        )
-    return resp.json().get("response", "")
-
-
-AGENT_ROLES = {{
-    "researcher": "Research and gather information about the topic",
-    "analyzer": "Analyze the research findings and identify key insights",
-    "writer": "Write a clear, concise summary based on the analysis",
-}}
-
 
 @app.post("/run")
 async def run_workflow(req: AgentTask):
-    """Execute multi-agent workflow."""
-    results = []
-    context = ""
-
-    for agent_name in req.agents:
-        role = AGENT_ROLES.get(agent_name, f"Handle the {{agent_name}} part of the task")
-        output = await run_agent(agent_name, role, req.task, context)
-        results.append({{"agent": agent_name, "output": output}})
-        context += f"\\n[{{agent_name}}]: {{output}}"
-
-    return {{"task": req.task, "results": results, "final_output": results[-1]["output"] if results else ""}}
-
+    """Execute LangGraph multi-agent workflow."""
+    final_state = app_graph.invoke({{"messages": [HumanMessage(content=req.task)]}})
+    last_message = final_state["messages"][-1]
+    return {{"task": req.task, "final_output": last_message.content}}
 
 @app.get("/")
 async def root():
-    return {{"name": "{config.get("project_name", "Multi-Agent System")}", "agents": list(AGENT_ROLES.keys())}}
-
+    return {{"name": "{config.get("project_name", "Multi-Agent System")}", "status": "running", "mcp_enabled": True}}
 
 if __name__ == "__main__":
     import uvicorn
@@ -713,6 +763,8 @@ def _generate_requirements(template_id: str, tier: str, config: dict) -> str:
             base += "rank_bm25==0.2.2\nnumpy==2.0.0\n"
         elif mode == "hybrid":
             base += "chromadb==1.0.7\nrank_bm25==0.2.2\nnumpy==2.0.0\n"
+    elif template_id == "multi_agent":
+        base += "langchain==0.3.25\nlangchain-community==0.3.2\nlanggraph==0.2.38\nmcp==1.0.0\n"
     elif template_id == "data_analyzer":
         base += "pandas==2.2.3\nplotly==6.1.2\n"
     elif template_id == "llm_finetuner":
