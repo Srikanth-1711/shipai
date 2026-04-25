@@ -1,0 +1,37 @@
+# ShipAI Backend Dependencies
+# Core
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-dotenv==1.1.0
+pydantic==2.11.1
+pydantic-settings==2.9.1
+
+# Database
+sqlalchemy==2.0.40
+aiosqlite==0.21.0
+
+# HTTP Client (Ollama API)
+httpx==0.28.1
+aiohttp==3.12.1
+
+# Security
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+
+# AI/ML
+langchain==0.3.25
+langchain-community==0.3.24
+chromadb==1.0.7
+
+# Async task queue
+celery[redis]==5.5.2
+
+# Utilities
+jinja2==3.1.6
+psutil==7.0.0
+GPUtil==1.4.0
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.26.0
+httpx==0.28.1
