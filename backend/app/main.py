@@ -6,6 +6,9 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 
 from app.config import settings
 from app.routes import system, models, advisor, templates, license
@@ -76,9 +79,9 @@ app.include_router(templates.router)
 app.include_router(license.router)
 
 
-@app.get("/")
+@app.get("/api")
 async def root():
-    """Root endpoint — platform info."""
+    """Root API endpoint — platform info."""
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
@@ -93,3 +96,14 @@ async def root():
             "infra_patterns": "/api/system/infra-patterns",
         },
     }
+
+# Mount Frontend UI for Desktop App
+frontend_dir = os.path.join(os.path.dirname(__file__), "../../frontend")
+if os.path.exists(frontend_dir):
+    app.mount("/css", StaticFiles(directory=os.path.join(frontend_dir, "css")), name="css")
+    app.mount("/js", StaticFiles(directory=os.path.join(frontend_dir, "js")), name="js")
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(os.path.join(frontend_dir, "index.html"))
