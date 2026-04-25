@@ -31,6 +31,7 @@ TEMPLATE_REGISTRY = {
             {"name": "documents_path", "type": "path", "required": True, "description": "Path to your documents (PDF, TXT, CSV)"},
             {"name": "system_prompt", "type": "text", "required": False, "default": "You are a helpful assistant.", "description": "Chatbot personality and instructions"},
             {"name": "model", "type": "model_select", "required": False, "default": "auto", "description": "LLM model to use (auto = best for your hardware)"},
+            {"name": "llm_provider", "type": "string", "required": False, "default": "ollama", "description": "LLM Provider: ollama, openai, or anthropic"},
             {"name": "retrieval_mode", "type": "string", "required": False, "default": "vector_chroma", "description": "Retrieval mode: vector_chroma, vector_pinecone, vectorless_bm25, or hybrid"},
             {"name": "chunk_size", "type": "integer", "required": False, "default": 512, "description": "Document chunk size for embeddings"},
             {"name": "top_k", "type": "integer", "required": False, "default": 5, "description": "Number of relevant chunks to retrieve"},
@@ -51,6 +52,7 @@ TEMPLATE_REGISTRY = {
             {"name": "agents", "type": "agent_list", "required": True, "description": "List of agents with roles and tools"},
             {"name": "workflow", "type": "workflow", "required": False, "default": "sequential", "description": "Agent workflow type: sequential, parallel, hierarchical"},
             {"name": "model", "type": "model_select", "required": False, "default": "auto", "description": "LLM model for agents"},
+            {"name": "llm_provider", "type": "string", "required": False, "default": "ollama", "description": "LLM Provider: ollama, openai, or anthropic"},
         ],
         "outputs": ["Agent orchestrator", "Tool framework", "Monitoring dashboard", "API endpoints", "Production infra"],
         "tech_stack": ["FastAPI", "LangGraph", "Ollama", "WebSocket"],
@@ -212,7 +214,7 @@ def _generate_rag_chatbot(output_path: Path, config: dict) -> list[str]:
     files = []
     
     retrieval_mode = config.get("retrieval_mode", "vector_chroma")
-    imports = "import chromadb\\nfrom chromadb.config import Settings as ChromaSettings"
+    imports = "import chromadb\nfrom chromadb.config import Settings as ChromaSettings"
     db_setup = f'''chroma_client = chromadb.Client(ChromaSettings(anonymized_telemetry=False))
 collection = chroma_client.get_or_create_collection("{config.get("project_name", "docs").replace(" ", "_").lower()}")'''
     query_logic = '''    results = collection.query(query_texts=[req.question], n_results=req.top_k)
@@ -228,7 +230,7 @@ index = pc.Index("{config.get("project_name", "docs").replace(" ", "_").lower()[
     context = "\\n\\n".join([match.metadata.get('text', '') for match in results.matches]) if results.matches else "No relevant documents found."
     sources = [match.metadata.get('text', '') for match in results.matches][:3]'''
     elif retrieval_mode == "vectorless_bm25":
-        imports = "from rank_bm25 import BM25Okapi\\nimport numpy as np"
+        imports = "from rank_bm25 import BM25Okapi\nimport numpy as np"
         db_setup = '''bm25_corpus = []
 bm25_index = None'''
         query_logic = '''    global bm25_index, bm25_corpus
@@ -241,6 +243,51 @@ bm25_index = None'''
         top_indices = np.argsort(doc_scores)[::-1][:req.top_k]
         sources = [bm25_corpus[i] for i in top_indices if doc_scores[i] > 0]
         context = "\\n\\n".join(sources) if sources else "No relevant documents found."'''
+
+    llm_provider = config.get("llm_provider", "ollama")
+    
+    if llm_provider == "openai":
+        imports += "\nfrom openai import AsyncOpenAI"
+        llm_config = '''# OpenAI config
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key")
+MODEL = os.getenv("MODEL", "gpt-4o-mini")
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)'''
+        generate_logic = '''    prompt = f"""Context:\\n{context}\\n\\nQuestion: {req.question}\\n\\nAnswer based on the context above:"""
+    resp = await client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    answer = resp.choices[0].message.content'''
+    elif llm_provider == "anthropic":
+        imports += "\nfrom anthropic import AsyncAnthropic"
+        llm_config = '''# Anthropic config
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-api-key")
+MODEL = os.getenv("MODEL", "claude-3-haiku-20240307")
+client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)'''
+        generate_logic = '''    prompt = f"""Context:\\n{context}\\n\\nQuestion: {req.question}\\n\\nAnswer based on the context above:"""
+    resp = await client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    answer = resp.content[0].text'''
+    else:
+        # Default Ollama
+        llm_config = f'''# Ollama config
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+MODEL = os.getenv("MODEL", "{config.get("model", "tinyllama")}")'''
+        generate_logic = '''    prompt = f"""Context:\\n{context}\\n\\nQuestion: {req.question}\\n\\nAnswer based on the context above:"""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={"model": MODEL, "prompt": prompt, "system": SYSTEM_PROMPT, "stream": False},
+            timeout=120,
+        )
+        answer = resp.json().get("response", "")'''
 
     # main.py
     main_code = f'''"""
@@ -258,9 +305,7 @@ import httpx
 app = FastAPI(title="{config.get("project_name", "RAG Chatbot")}")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Ollama config
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "{config.get("model", "tinyllama")}")
+{llm_config}
 SYSTEM_PROMPT = """{config.get("system_prompt", "You are a helpful assistant. Answer questions based on the provided context.")}"""
 
 # Database Setup
@@ -283,21 +328,14 @@ async def query(req: QueryRequest):
 {query_logic}
 
     # Generate answer with context
-    prompt = f"""Context:\\n{{context}}\\n\\nQuestion: {{req.question}}\\n\\nAnswer based on the context above:"""
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{{OLLAMA_URL}}/api/generate",
-            json={{"model": MODEL, "prompt": prompt, "system": SYSTEM_PROMPT, "stream": False}},
-            timeout=120,
-        )
-        data = resp.json()
+{generate_logic}
 
     return {{
-        "answer": data.get("response", ""),
+        "answer": answer,
         "sources": sources,
         "model": MODEL,
     }}
+
 
 if __name__ == "__main__":
     import uvicorn
@@ -655,6 +693,13 @@ def _generate_requirements(template_id: str, tier: str, config: dict) -> str:
         base += "celery==5.4.0\nredis==5.2.1\n"
     if tier in ["pro", "enterprise"]:
         base += "prometheus-client==0.21.1\nlocust==2.32.4\n"
+
+    # Provider dependencies
+    llm_provider = config.get("llm_provider", "ollama")
+    if llm_provider == "openai":
+        base += "openai==1.52.2\n"
+    elif llm_provider == "anthropic":
+        base += "anthropic==0.39.0\n"
 
     # Template dependencies
     if template_id == "rag_chatbot":
