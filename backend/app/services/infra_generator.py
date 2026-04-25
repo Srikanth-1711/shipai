@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 TIER_PATTERNS = {
     "free": ["rate_limiting", "caching", "api_gateway"],
     "starter": ["rate_limiting", "caching", "api_gateway", "circuit_breaker", "message_queue"],
-    "pro": ["rate_limiting", "caching", "api_gateway", "circuit_breaker", "message_queue", "load_balancing", "auto_scaling"],
-    "enterprise": ["rate_limiting", "caching", "api_gateway", "circuit_breaker", "message_queue", "load_balancing", "auto_scaling"],
+    "pro": ["rate_limiting", "caching", "api_gateway", "circuit_breaker", "message_queue", "load_balancing", "auto_scaling", "observability", "load_testing"],
+    "enterprise": ["rate_limiting", "caching", "api_gateway", "circuit_breaker", "message_queue", "load_balancing", "auto_scaling", "observability", "load_testing"],
 }
 
 
@@ -336,147 +336,67 @@ embedding_circuit = CircuitBreaker(name="embedding_endpoint", failure_threshold=
     },
 
     "message_queue": {
-        "description": "Async job queue -- decouples API requests from LLM inference workers",
+        "description": "Production message queue using Celery and Redis for async LLM jobs",
         "files": {
-            "middleware/queue.py": '''"""Message Queue -- Async job processing for LLM inference"""
-import asyncio
-import uuid
-import time
-import logging
-from enum import Enum
-from typing import Any, Callable, Optional
-from dataclasses import dataclass, field
+            "workers/celery_worker.py": '''"""Celery Worker for Async LLM Processing"""
+import os
+import httpx
+from celery import Celery
 
-logger = logging.getLogger(__name__)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
+# Initialize Celery
+celery_app = Celery(
+    "shipai_tasks",
+    broker=REDIS_URL,
+    backend=REDIS_URL
+)
 
-class JobStatus(Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    task_track_started=True,
+    task_time_limit=300,  # 5 minute hard limit
+)
 
-
-@dataclass
-class Job:
-    id: str
-    task_type: str
-    payload: dict
-    status: JobStatus = JobStatus.PENDING
-    result: Any = None
-    error: Optional[str] = None
-    created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
-
-
-class InMemoryQueue:
-    """
-    Simple async message queue for LLM inference.
-    For production, swap with Celery + Redis.
-    """
-
-    def __init__(self, max_workers: int = 2, max_queue_size: int = 100):
-        self.max_workers = max_workers
-        self.max_queue_size = max_queue_size
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
-        self.jobs: dict[str, Job] = {}
-        self.handlers: dict[str, Callable] = {}
-        self._workers: list[asyncio.Task] = []
-
-    def register_handler(self, task_type: str, handler: Callable):
-        """Register a handler for a task type."""
-        self.handlers[task_type] = handler
-
-    async def enqueue(self, task_type: str, payload: dict) -> str:
-        """Add a job to the queue. Returns job ID."""
-        job = Job(id=str(uuid.uuid4())[:8], task_type=task_type, payload=payload)
-        self.jobs[job.id] = job
-
-        try:
-            self.queue.put_nowait(job)
-            logger.info(f"Job {job.id} enqueued ({task_type})")
-        except asyncio.QueueFull:
-            job.status = JobStatus.FAILED
-            job.error = "Queue is full. Please try again later."
-            logger.warning(f"Queue full -- job {job.id} rejected")
-
-        return job.id
-
-    def get_job_status(self, job_id: str) -> Optional[dict]:
-        """Get the status of a job."""
-        job = self.jobs.get(job_id)
-        if not job:
-            return None
-        return {
-            "id": job.id,
-            "status": job.status.value,
-            "task_type": job.task_type,
-            "result": job.result,
-            "error": job.error,
-            "duration_ms": (
-                round((job.completed_at - job.started_at) * 1000, 2)
-                if job.completed_at and job.started_at else None
-            ),
-        }
-
-    async def _worker(self, worker_id: int):
-        """Background worker that processes jobs."""
-        logger.info(f"Worker {worker_id} started")
-        while True:
-            try:
-                job = await self.queue.get()
-                job.status = JobStatus.PROCESSING
-                job.started_at = time.time()
-
-                handler = self.handlers.get(job.task_type)
-                if not handler:
-                    job.status = JobStatus.FAILED
-                    job.error = f"No handler for task type: {job.task_type}"
-                else:
-                    try:
-                        job.result = await handler(job.payload)
-                        job.status = JobStatus.COMPLETED
-                    except Exception as e:
-                        job.status = JobStatus.FAILED
-                        job.error = str(e)
-
-                job.completed_at = time.time()
-                self.queue.task_done()
-                logger.info(f"Worker {worker_id}: Job {job.id} -> {job.status.value}")
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}")
-
-    async def start_workers(self):
-        """Start background workers."""
-        for i in range(self.max_workers):
-            task = asyncio.create_task(self._worker(i))
-            self._workers.append(task)
-
-    async def stop_workers(self):
-        """Stop all workers."""
-        for task in self._workers:
-            task.cancel()
-        self._workers.clear()
-
-    def stats(self) -> dict:
-        return {
-            "queue_size": self.queue.qsize(),
-            "max_queue_size": self.max_queue_size,
-            "active_workers": len(self._workers),
-            "total_jobs": len(self.jobs),
-            "pending": sum(1 for j in self.jobs.values() if j.status == JobStatus.PENDING),
-            "processing": sum(1 for j in self.jobs.values() if j.status == JobStatus.PROCESSING),
-            "completed": sum(1 for j in self.jobs.values() if j.status == JobStatus.COMPLETED),
-            "failed": sum(1 for j in self.jobs.values() if j.status == JobStatus.FAILED),
-        }
-
-
-# Global queue instance
-job_queue = InMemoryQueue(max_workers=2, max_queue_size=100)
+@celery_app.task(bind=True, name="generate_llm_response", max_retries=3)
+def generate_llm_response(self, prompt: str, model: str = "tinyllama"):
+    """Background task to call the LLM."""
+    try:
+        # Use sync client inside Celery worker for simplicity
+        with httpx.Client(timeout=120) as client:
+            resp = client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={"model": model, "prompt": prompt, "stream": False}
+            )
+            resp.raise_for_status()
+            return resp.json().get("response", "")
+    except httpx.HTTPError as exc:
+        # Exponential backoff retry
+        countdown = 2 ** self.request.retries
+        raise self.retry(exc=exc, countdown=countdown)
 ''',
+            "workers/docker-compose.redis.yml": '''# Drop-in Docker Compose file for Redis + Celery Worker
+version: "3.8"
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+  
+  worker:
+    build: .
+    command: celery -A workers.celery_worker.celery_app worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_URL=http://host.docker.internal:11434
+    depends_on:
+      - redis
+'''
         },
     },
 
@@ -559,6 +479,78 @@ scaling_policy:
       interval: 30s
       timeout: 5s
       unhealthy_threshold: 3
+''',
+        },
+    },
+
+    "observability": {
+        "description": "OpenTelemetry and Prometheus integration for monitoring LLM latency and token usage",
+        "files": {
+            "middleware/telemetry.py": '''"""Observability Middleware -- Prometheus & OpenTelemetry"""
+import time
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from prometheus_client import Counter, Histogram, generate_latest
+
+# Prometheus Metrics
+REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
+REQUEST_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency", ["method", "endpoint"])
+LLM_TOKEN_COUNT = Counter("llm_tokens_total", "Total LLM tokens generated", ["model"])
+
+class TelemetryMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/metrics":
+            return await call_next(request)
+            
+        start_time = time.time()
+        response = await call_next(request)
+        duration = time.time() - start_time
+        
+        REQUEST_COUNT.labels(
+            method=request.method,
+            endpoint=request.url.path,
+            status=response.status_code
+        ).inc()
+        
+        REQUEST_LATENCY.labels(
+            method=request.method,
+            endpoint=request.url.path
+        ).observe(duration)
+        
+        return response
+
+def get_metrics():
+    return generate_latest()
+''',
+        },
+    },
+
+    "load_testing": {
+        "description": "Locust load testing script to verify scale and rate limits",
+        "files": {
+            "tests/load_test.py": '''"""Locust Load Test Script"""
+# Run with: locust -f tests/load_test.py --host=http://localhost:8001
+from locust import HttpUser, task, between
+import random
+
+class LLMUser(HttpUser):
+    wait_time = between(1, 5) # Wait 1-5 seconds between tasks
+
+    @task(3)
+    def test_health(self):
+        self.client.get("/")
+        
+    @task(1)
+    def test_inference(self):
+        questions = [
+            "What is AI?", 
+            "Explain quantum computing", 
+            "How does FastAPI work?"
+        ]
+        # Adjust payload based on the specific template's API
+        self.client.post("/query", json={
+            "question": random.choice(questions)
+        })
 ''',
         },
     },

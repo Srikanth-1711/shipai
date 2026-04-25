@@ -31,6 +31,7 @@ TEMPLATE_REGISTRY = {
             {"name": "documents_path", "type": "path", "required": True, "description": "Path to your documents (PDF, TXT, CSV)"},
             {"name": "system_prompt", "type": "text", "required": False, "default": "You are a helpful assistant.", "description": "Chatbot personality and instructions"},
             {"name": "model", "type": "model_select", "required": False, "default": "auto", "description": "LLM model to use (auto = best for your hardware)"},
+            {"name": "retrieval_mode", "type": "string", "required": False, "default": "vector_chroma", "description": "Retrieval mode: vector_chroma, vector_pinecone, vectorless_bm25, or hybrid"},
             {"name": "chunk_size", "type": "integer", "required": False, "default": 512, "description": "Document chunk size for embeddings"},
             {"name": "top_k", "type": "integer", "required": False, "default": 5, "description": "Number of relevant chunks to retrieve"},
         ],
@@ -174,7 +175,7 @@ async def generate_project(
         generated_files.append(str(readme_path))
 
         # 5. Generate requirements.txt
-        reqs = _generate_requirements(template_id)
+        reqs = _generate_requirements(template_id, tier, config)
         reqs_path = output_path / "requirements.txt"
         reqs_path.write_text(reqs, encoding="utf-8")
         generated_files.append(str(reqs_path))
@@ -209,19 +210,50 @@ async def generate_project(
 def _generate_rag_chatbot(output_path: Path, config: dict) -> list[str]:
     """Generate a RAG chatbot project."""
     files = []
+    
+    retrieval_mode = config.get("retrieval_mode", "vector_chroma")
+    imports = "import chromadb\\nfrom chromadb.config import Settings as ChromaSettings"
+    db_setup = f'''chroma_client = chromadb.Client(ChromaSettings(anonymized_telemetry=False))
+collection = chroma_client.get_or_create_collection("{config.get("project_name", "docs").replace(" ", "_").lower()}")'''
+    query_logic = '''    results = collection.query(query_texts=[req.question], n_results=req.top_k)
+    context = "\\n\\n".join(results["documents"][0]) if results["documents"][0] else "No relevant documents found."
+    sources = results["documents"][0][:3] if results["documents"][0] else []'''
+
+    if retrieval_mode == "vector_pinecone":
+        imports = "from pinecone import Pinecone"
+        db_setup = f'''pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY", "your-api-key"))
+index = pc.Index("{config.get("project_name", "docs").replace(" ", "_").lower()[:45]}")'''
+        query_logic = '''    # Pinecone requires actual embeddings generation here, stubbed for template
+    results = index.query(vector=[0.0]*768, top_k=req.top_k, include_metadata=True)
+    context = "\\n\\n".join([match.metadata.get('text', '') for match in results.matches]) if results.matches else "No relevant documents found."
+    sources = [match.metadata.get('text', '') for match in results.matches][:3]'''
+    elif retrieval_mode == "vectorless_bm25":
+        imports = "from rank_bm25 import BM25Okapi\\nimport numpy as np"
+        db_setup = '''bm25_corpus = []
+bm25_index = None'''
+        query_logic = '''    global bm25_index, bm25_corpus
+    if not bm25_index:
+        context = "No documents indexed."
+        sources = []
+    else:
+        tokenized_query = req.question.split(" ")
+        doc_scores = bm25_index.get_scores(tokenized_query)
+        top_indices = np.argsort(doc_scores)[::-1][:req.top_k]
+        sources = [bm25_corpus[i] for i in top_indices if doc_scores[i] > 0]
+        context = "\\n\\n".join(sources) if sources else "No relevant documents found."'''
 
     # main.py
     main_code = f'''"""
 {config.get("project_name", "RAG Chatbot")} — Powered by ShipAI
-Production-ready RAG chatbot with vector search and conversation memory.
+Production-ready RAG chatbot with conversation memory.
+Retrieval Mode: {retrieval_mode}
 """
 import os
 from fastapi import FastAPI, WebSocket, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+{imports}
 
 app = FastAPI(title="{config.get("project_name", "RAG Chatbot")}")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -231,42 +263,24 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODEL = os.getenv("MODEL", "{config.get("model", "tinyllama")}")
 SYSTEM_PROMPT = """{config.get("system_prompt", "You are a helpful assistant. Answer questions based on the provided context.")}"""
 
-# Vector DB
-chroma_client = chromadb.Client(ChromaSettings(anonymized_telemetry=False))
-collection = chroma_client.get_or_create_collection("{config.get("project_name", "docs").replace(" ", "_").lower()}")
+# Database Setup
+{db_setup}
 
 TOP_K = {config.get("top_k", 5)}
-
 
 class QueryRequest(BaseModel):
     question: str
     top_k: int = TOP_K
 
-
-class IngestRequest(BaseModel):
-    text: str
-    metadata: dict = {{}}
-
-
 @app.get("/")
 async def root():
     return {{"name": "{config.get("project_name", "RAG Chatbot")}", "status": "running", "docs": "/docs"}}
-
-
-@app.post("/ingest")
-async def ingest_document(req: IngestRequest):
-    """Add a document to the knowledge base."""
-    doc_id = f"doc_{{collection.count()}}"
-    collection.add(documents=[req.text], ids=[doc_id], metadatas=[req.metadata])
-    return {{"status": "ingested", "doc_id": doc_id, "total_docs": collection.count()}}
-
 
 @app.post("/query")
 async def query(req: QueryRequest):
     """Ask a question — retrieves relevant docs and generates answer."""
     # Retrieve relevant documents
-    results = collection.query(query_texts=[req.question], n_results=req.top_k)
-    context = "\\n\\n".join(results["documents"][0]) if results["documents"][0] else "No relevant documents found."
+{query_logic}
 
     # Generate answer with context
     prompt = f"""Context:\\n{{context}}\\n\\nQuestion: {{req.question}}\\n\\nAnswer based on the context above:"""
@@ -281,15 +295,9 @@ async def query(req: QueryRequest):
 
     return {{
         "answer": data.get("response", ""),
-        "sources": results["documents"][0][:3],
+        "sources": sources,
         "model": MODEL,
     }}
-
-
-@app.get("/stats")
-async def stats():
-    return {{"total_documents": collection.count(), "model": MODEL}}
-
 
 if __name__ == "__main__":
     import uvicorn
@@ -639,10 +647,27 @@ Once running, visit `http://localhost:8001/docs` for interactive API documentati
 """
 
 
-def _generate_requirements(template_id: str) -> str:
+def _generate_requirements(template_id: str, tier: str, config: dict) -> str:
     base = "fastapi==0.115.12\nuvicorn==0.34.2\nhttpx==0.28.1\npython-dotenv==1.1.0\n"
+    
+    # Infrastructure dependencies
+    if tier in ["starter", "pro", "enterprise"]:
+        base += "celery==5.4.0\nredis==5.2.1\n"
+    if tier in ["pro", "enterprise"]:
+        base += "prometheus-client==0.21.1\nlocust==2.32.4\n"
+
+    # Template dependencies
     if template_id == "rag_chatbot":
-        base += "chromadb==1.0.7\nlangchain==0.3.25\n"
+        base += "langchain==0.3.25\n"
+        mode = config.get("retrieval_mode", "vector_chroma")
+        if mode == "vector_chroma":
+            base += "chromadb==1.0.7\n"
+        elif mode == "vector_pinecone":
+            base += "pinecone-client==5.0.1\n"
+        elif mode == "vectorless_bm25":
+            base += "rank_bm25==0.2.2\nnumpy==2.0.0\n"
+        elif mode == "hybrid":
+            base += "chromadb==1.0.7\nrank_bm25==0.2.2\nnumpy==2.0.0\n"
     elif template_id == "data_analyzer":
         base += "pandas==2.2.3\nplotly==6.1.2\n"
     elif template_id == "llm_finetuner":
