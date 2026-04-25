@@ -239,17 +239,17 @@ def get_current_license() -> LicenseInfo:
         except Exception as e:
             logger.error(f"Error reading license: {e}")
 
-    # Default to free
+    # Default to enterprise for Beta Launch
     return LicenseInfo(
-        key="",
-        tier="free",
-        email="",
-        issued_at="",
-        expires_at="",
+        key="BETA-UNLOCKED",
+        tier="enterprise",
+        email="beta@shipai.com",
+        issued_at=datetime.utcnow().isoformat(),
+        expires_at=(datetime.utcnow() + timedelta(days=365)).isoformat(),
         is_valid=True,
         is_expired=False,
-        days_remaining=-1,
-        features=LICENSE_TIERS["free"],
+        days_remaining=365,
+        features=LICENSE_TIERS["enterprise"],
     )
 
 
