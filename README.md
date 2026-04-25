@@ -2,25 +2,27 @@
 
 > The AI Engineer You Can Hire at Scale. Ship AI Products in Minutes, Not Months.
 
-ShipAI is an offline-first AI Engineering platform that democratizes the creation of production-ready AI applications. It leverages local models via Ollama to generate fully functional AI projects injected with senior-level infrastructure patterns. 
+ShipAI is an offline-first AI Engineering platform that democratizes the creation of production-ready AI applications. It leverages local models (Ollama) and Cloud APIs (OpenAI/Anthropic) to generate fully functional AI projects injected with senior-level infrastructure patterns. 
 
-Zero tokens. Zero cloud bills. 100% private.
+Zero tokens. Zero cloud bills. 100% private. (Or plug in your own API keys for massive scale).
 
 ## ✨ Features
 
+- **3 Ways to Deploy**: Use the CLI (Engineers), the API/SDK (Enterprise), or the completely standalone **1-Click Desktop App** (Non-tech users).
 - **AI Architecture Advisor**: Describe your problem; get expert recommendations from 16 AI patterns (RAG, Agents, Fine-Tuning).
-- **Hardware-Aware**: Automatically detects your hardware (CPU/GPU/RAM) to recommend the most optimal local models.
 - **Template Engine**: Instantly generate complete AI codebases:
-  - 📚 RAG Chatbot
+  - 📚 RAG Chatbot (Vector DB & Smart Vector-less BM25 Search)
   - 🤖 Multi-Agent System
   - 📊 AI Data Analyzer
+  - 🧠 LLM Fine-Tuner (Unsloth/PEFT Pipeline)
 - **Production Infrastructure Built-in**: Every project comes pre-configured with 7 enterprise patterns:
-  1. Rate Limiting
-  2. Caching
-  3. API Gateway
-  4. Load Balancing
-  5. Circuit Breaker
-  6. Auto Scaling
+  1. Rate Limiting & Caching
+  2. API Gateway
+  3. Load Balancing & Auto Scaling
+  4. Circuit Breaker
+  5. Asynchronous Message Queues (Celery + Redis)
+  6. Observability (Prometheus/OpenTelemetry)
+  7. Load Testing (Locust)
   7. Message Queue
 - **100% Offline**: Powered by local LLMs via Ollama. No data leaves your machine.
 
