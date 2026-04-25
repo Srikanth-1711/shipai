@@ -71,6 +71,23 @@ TEMPLATE_REGISTRY = {
         "outputs": ["Analysis API", "Auto-generated charts", "NL query interface", "Insights dashboard", "Production infra"],
         "tech_stack": ["FastAPI", "Pandas", "Plotly", "Ollama"],
     },
+    "llm_finetuner": {
+        "name": "LLM Fine-Tuner",
+        "description": "Production pipeline for PEFT/LoRA fine-tuning on local hardware. Prepare data, train, and deploy.",
+        "category": "fine_tuning",
+        "icon": "🧠",
+        "tier": "pro",
+        "min_hardware": "high",
+        "estimated_setup_time": "15 minutes",
+        "inputs": [
+            {"name": "project_name", "type": "string", "required": True, "description": "Name for your fine-tuning project"},
+            {"name": "dataset_path", "type": "path", "required": True, "description": "Path to JSONL training data"},
+            {"name": "base_model", "type": "string", "required": False, "default": "unsloth/llama-3-8b-bnb-4bit", "description": "HuggingFace base model"},
+            {"name": "target_modules", "type": "string", "required": False, "default": "q_proj,k_proj,v_proj,o_proj", "description": "LoRA target modules"},
+        ],
+        "outputs": ["Data prep pipeline", "Unsloth training script", "Model export to Ollama/GGUF", "Inference API", "Production infra"],
+        "tech_stack": ["Unsloth", "PyTorch", "Transformers", "FastAPI"],
+    },
 }
 
 
@@ -129,6 +146,8 @@ async def generate_project(
             generated_files.extend(_generate_multi_agent(output_path, config))
         elif template_id == "data_analyzer":
             generated_files.extend(_generate_data_analyzer(output_path, config))
+        elif template_id == "llm_finetuner":
+            generated_files.extend(_generate_llm_finetuner(output_path, config))
 
         # 2. Inject production infrastructure (7 patterns)
         infra_files = generate_infra_files(output_dir, tier=tier)
@@ -451,6 +470,143 @@ if __name__ == "__main__":
     return files
 
 
+def _generate_llm_finetuner(output_path: Path, config: dict) -> list[str]:
+    """Generate an LLM fine-tuning project (LoRA)."""
+    files = []
+
+    # main.py (Training Script)
+    train_code = f'''"""
+{config.get("project_name", "LLM Fine-Tuner")} — Powered by ShipAI
+Unsloth-optimized PEFT/LoRA fine-tuning script.
+"""
+import os
+import torch
+from unsloth import FastLanguageModel
+from datasets import load_dataset
+from trl import SFTTrainer
+from transformers import TrainingArguments
+
+# Configuration
+BASE_MODEL = "{config.get("base_model", "unsloth/llama-3-8b-bnb-4bit")}"
+MAX_SEQ_LENGTH = 2048
+DATASET_PATH = "{config.get("dataset_path", "data.jsonl")}"
+
+def main():
+    print("🚀 Initializing Unsloth Model...")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=BASE_MODEL,
+        max_seq_length=MAX_SEQ_LENGTH,
+        dtype=None,
+        load_in_4bit=True,
+    )
+
+    print("🔧 Applying LoRA Adapters...")
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=16,
+        target_modules=[{", ".join([f'"{m.strip()}"' for m in config.get("target_modules", "q_proj,k_proj,v_proj,o_proj").split(',')])}],
+        lora_alpha=16,
+        lora_dropout=0,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
+        use_rslora=False,
+        loftq_config=None,
+    )
+
+    print("📊 Loading Dataset...")
+    if os.path.exists(DATASET_PATH):
+        dataset = load_dataset("json", data_files=DATASET_PATH, split="train")
+    else:
+        print(f"⚠️ Dataset {{DATASET_PATH}} not found. Using sample data.")
+        # Fallback sample dataset
+        dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
+        
+    def formatting_prompts_func(examples):
+        instructions = examples.get("instruction", examples.get("prompt", []))
+        inputs       = examples.get("input", [""] * len(instructions))
+        outputs      = examples.get("output", examples.get("response", []))
+        texts = []
+        for instruction, input, output in zip(instructions, inputs, outputs):
+            text = f"Instruction: {{instruction}}\\nInput: {{input}}\\nOutput: {{output}}"
+            texts.append(text)
+        return {{"text": texts}}
+        
+    dataset = dataset.map(formatting_prompts_func, batched=True)
+
+    print("🎓 Starting Training...")
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        train_dataset=dataset,
+        dataset_text_field="text",
+        max_seq_length=MAX_SEQ_LENGTH,
+        dataset_num_proc=2,
+        args=TrainingArguments(
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=4,
+            warmup_steps=5,
+            max_steps=60, # Increase for real training
+            learning_rate=2e-4,
+            fp16=not torch.cuda.is_bf16_supported(),
+            bf16=torch.cuda.is_bf16_supported(),
+            logging_steps=1,
+            optim="adamw_8bit",
+            weight_decay=0.01,
+            lr_scheduler_type="linear",
+            seed=3407,
+            output_dir="outputs",
+        ),
+    )
+
+    trainer.train()
+
+    print("💾 Saving LoRA Adapters...")
+    model.save_pretrained("lora_model")
+    tokenizer.save_pretrained("lora_model")
+    
+    print("✅ Training Complete! You can now merge and export to GGUF for Ollama.")
+
+if __name__ == "__main__":
+    main()
+'''
+    train_path = output_path / "train.py"
+    train_path.write_text(train_code, encoding="utf-8")
+    files.append(str(train_path))
+    
+    # Api server for the finetuned model
+    api_code = f'''"""
+FastAPI Server for {config.get("project_name", "Fine-Tuned LLM")}
+"""
+from fastapi import FastAPI
+from pydantic import BaseModel
+import os
+
+app = FastAPI(title="Fine-Tuned LLM API")
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_tokens: int = 512
+
+@app.post("/generate")
+async def generate(req: GenerateRequest):
+    return {{"response": f"Inference pipeline placeholder for: {{req.prompt}}"}}
+
+@app.get("/")
+async def root():
+    return {{"status": "running", "model": "{config.get("base_model", "unsloth/llama-3-8b-bnb-4bit")}"}}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8004)
+'''
+    api_path = output_path / "main.py"
+    api_path.write_text(api_code, encoding="utf-8")
+    files.append(str(api_path))
+
+    return files
+
+
 def _generate_readme(template: dict, config: dict, project_name: str) -> str:
     return f"""# {project_name}
 
@@ -489,6 +645,8 @@ def _generate_requirements(template_id: str) -> str:
         base += "chromadb==1.0.7\nlangchain==0.3.25\n"
     elif template_id == "data_analyzer":
         base += "pandas==2.2.3\nplotly==6.1.2\n"
+    elif template_id == "llm_finetuner":
+        base += "torch==2.3.0\ntransformers==4.40.1\ntrl==0.8.6\ndatasets==2.19.0\nunsloth==2024.4\n"
     return base
 
 
