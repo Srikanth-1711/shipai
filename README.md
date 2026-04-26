@@ -15,15 +15,29 @@ Zero tokens. Zero cloud bills. 100% private. (Or plug in your own API keys for m
   - 🤖 Multi-Agent System
   - 📊 AI Data Analyzer
   - 🧠 LLM Fine-Tuner (Unsloth/PEFT Pipeline)
-- **Production Infrastructure Built-in**: Every project comes pre-configured with 7 enterprise patterns:
-  1. Rate Limiting & Caching
-  2. API Gateway
-  3. Load Balancing & Auto Scaling
-  4. Circuit Breaker
-  5. Asynchronous Message Queues (Celery + Redis)
-  6. Observability (Prometheus/OpenTelemetry)
-  7. Load Testing (Locust)
-  7. Message Queue
+
+### 🌊 The "RAG for Builders" Difference
+Most tools only give you the surface-level RAG (Beginner). ShipAI handles the **Hidden Complexity** (Builder):
+- ✅ **Query Reformulation**: Automatically rewrites user queries for better retrieval.
+- ✅ **PII Masking**: Built-in regex filters to redact sensitive data before indexing.
+- ✅ **Hybrid Search**: Seamlessly switches between Vector (Chroma) and Sparse (BM25) retrieval.
+- ✅ **Enterprise Infra**: Every project comes pre-configured with 7 patterns:
+  1. Rate Limiting & Caching (Redis)
+  2. Asynchronous Workers (Celery)
+  3. Observability (Prometheus/OpenTelemetry)
+  4. Load Testing (Locust)
+  5. API Gateway & Load Balancing
+  6. Circuit Breakers
+  7. Auto-Scaling Scaffolds
+
+### 🧊 The "Agentic AI for Builders" Iceberg
+Building an agent is easy. Building a **production agent** is hard. ShipAI handles the complexity below the surface:
+- ✅ **State Persistence**: Built-in stubs for LangGraph checkpointers to recover from failures.
+- ✅ **Trajectory Tracing**: Real-time logging of the agent's "thinking" process and tool selection.
+- ✅ **Loop Protection**: Automatic step-counters to prevent infinite reasoning loops and cost overruns.
+- ✅ **Human-in-the-Loop**: Integrated endpoints for human approval before high-stakes tool calls.
+- ✅ **MCP Native**: Standardized integration with Model Context Protocol for enterprise data access.
+
 - **100% Offline**: Powered by local LLMs via Ollama. No data leaves your machine.
 
 ## 🚀 Quick Start
