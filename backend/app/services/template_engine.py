@@ -317,9 +317,32 @@ class QueryRequest(BaseModel):
     question: str
     top_k: int = TOP_K
 
+class IngestRequest(BaseModel):
+    text: str
+    metadata: dict = {{}}
+
 @app.get("/")
 async def root():
     return {{"name": "{config.get("project_name", "RAG Chatbot")}", "status": "running", "docs": "/docs"}}
+
+@app.post("/ingest")
+async def ingest(req: IngestRequest):
+    """Ingest text into the knowledge base."""
+    # 1. Simple Chunking
+    chunks = [req.text[i:i+500] for i in range(0, len(req.text), 450)]
+    
+    # 2. Add to Knowledge Base
+    ids = [f"doc_{{i}}_{{os.urandom(4).hex()}}" for i in range(len(chunks))]
+    
+    if "{retrieval_mode}" == "vector_chroma":
+        collection.add(documents=chunks, ids=ids)
+    elif "{retrieval_mode}" == "vectorless_bm25":
+        global bm25_index, bm25_corpus
+        bm25_corpus.extend(chunks)
+        from rank_bm25 import BM25Okapi
+        bm25_index = BM25Okapi([doc.split(" ") for doc in bm25_corpus])
+    
+    return {{"status": "success", "chunks_processed": len(chunks)}}
 
 @app.post("/query")
 async def query(req: QueryRequest):
@@ -336,6 +359,15 @@ async def query(req: QueryRequest):
         "model": MODEL,
     }}
 
+@app.get("/evaluate")
+async def evaluate():
+    """Stub for RAG evaluation metrics (Precision/Recall/Hit-Rate)."""
+    return {{
+        "retrieval_precision": "0.85 (simulated)",
+        "faithfulness": "0.92 (simulated)",
+        "hit_rate_at_k": "0.78 (simulated)",
+        "latency_ms": 120
+    }}
 
 if __name__ == "__main__":
     import uvicorn
