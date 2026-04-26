@@ -5,7 +5,8 @@ setup(
     version="1.4.0",
     description="The AI Engineer You Can Hire at Scale",
     author="Srikanth",
-    packages=find_packages(),
+    packages=find_packages(include=["shipai", "shipai.*", "backend", "backend.*"]),
+    include_package_data=True,
     install_requires=[
         "fastapi>=0.115.0",
         "uvicorn[standard]>=0.30.0",
