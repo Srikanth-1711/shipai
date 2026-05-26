@@ -5,6 +5,8 @@ uvicorn[standard]>=0.30.0
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
+email-validator>=2.0.0
+python-multipart>=0.0.9
 
 # Database
 sqlalchemy>=2.0.0
@@ -17,10 +19,16 @@ aiohttp>=3.10.0
 # Security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1
 
 # AI/ML
 langchain>=0.3.0
 langchain-community>=0.3.0
+langgraph>=0.2.0
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
+fastmcp>=0.1.0
+mcp>=0.1.0
 chromadb>=0.5.0
 
 # Async task queue

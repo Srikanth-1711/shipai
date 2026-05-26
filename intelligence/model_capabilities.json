@@ -1,0 +1,200 @@
+{
+  "schema_version": "2.0",
+  "updated": "2026-05-24",
+  "models": {
+    "gemma2:2b": {
+      "size_gb": 1.6,
+      "min_vram_gb": 0,
+      "min_ram_gb": 4,
+      "fits_cpu": true,
+      "capabilities": {
+        "json_reliable": 0.75,
+        "tool_calling": false,
+        "reasoning_score": 0.55,
+        "code_generation": 0.5
+      },
+      "best_for": ["explainer", "interview_simple"],
+      "not_good_for": ["architect", "complex_json"],
+      "ollama_id": "gemma2:2b",
+      "license": "gemma"
+    },
+    "gemma2:9b": {
+      "size_gb": 5.4,
+      "min_vram_gb": 6,
+      "min_ram_gb": 8,
+      "fits_cpu": false,
+      "capabilities": {
+        "json_reliable": 0.9,
+        "tool_calling": true,
+        "reasoning_score": 0.72,
+        "code_generation": 0.7
+      },
+      "best_for": ["extraction", "pattern_matcher", "structured_output"],
+      "ollama_id": "gemma2:9b",
+      "license": "gemma"
+    },
+    "deepseek-r1:7b": {
+      "size_gb": 4.7,
+      "min_vram_gb": 5,
+      "min_ram_gb": 8,
+      "fits_cpu": false,
+      "capabilities": {
+        "json_reliable": 0.85,
+        "tool_calling": false,
+        "reasoning_score": 0.92,
+        "chain_of_thought": true,
+        "code_generation": 0.65
+      },
+      "best_for": ["architect", "complex_decisions"],
+      "ollama_id": "deepseek-r1:7b",
+      "license": "mit"
+    },
+    "qwen2.5:3b": {
+      "size_gb": 1.9,
+      "min_vram_gb": 2.5,
+      "min_ram_gb": 6,
+      "fits_cpu": true,
+      "capabilities": {
+        "json_reliable": 0.82,
+        "tool_calling": false,
+        "reasoning_score": 0.68,
+        "code_generation": 0.72
+      },
+      "best_for": ["interview_node", "explainer", "builder"],
+      "ollama_id": "qwen2.5:3b",
+      "license": "apache_2"
+    },
+    "qwen3:4b": {
+      "size_gb": 2.5,
+      "min_vram_gb": 3,
+      "min_ram_gb": 6,
+      "fits_cpu": true,
+      "capabilities": {
+        "json_reliable": 0.88,
+        "tool_calling": false,
+        "reasoning_score": 0.74,
+        "code_generation": 0.78
+      },
+      "best_for": ["extraction", "builder", "interview_node"],
+      "ollama_id": "qwen3:4b",
+      "license": "apache_2"
+    },
+    "qwen2.5-coder:7b": {
+      "size_gb": 4.7,
+      "min_vram_gb": 5,
+      "min_ram_gb": 8,
+      "fits_cpu": false,
+      "capabilities": {
+        "json_reliable": 0.92,
+        "tool_calling": false,
+        "reasoning_score": 0.75,
+        "code_generation": 0.91
+      },
+      "best_for": ["builder", "code_generation"],
+      "ollama_id": "qwen2.5-coder:7b",
+      "license": "apache_2"
+    },
+    "smollm2:1.7b": {
+      "size_gb": 1.7,
+      "min_vram_gb": 0,
+      "min_ram_gb": 4,
+      "fits_cpu": true,
+      "capabilities": {
+        "json_reliable": 0.7,
+        "tool_calling": false,
+        "reasoning_score": 0.5,
+        "code_generation": 0.55
+      },
+      "best_for": ["explainer", "interview_simple"],
+      "ollama_id": "smollm2:1.7b",
+      "license": "apache_2"
+    },
+    "phi3:mini": {
+      "size_gb": 2.2,
+      "min_vram_gb": 2.5,
+      "min_ram_gb": 6,
+      "fits_cpu": true,
+      "capabilities": {
+        "json_reliable": 0.8,
+        "tool_calling": false,
+        "reasoning_score": 0.62,
+        "code_generation": 0.6
+      },
+      "best_for": ["interview_node", "explainer"],
+      "ollama_id": "phi3:mini",
+      "license": "mit"
+    },
+    "llama3.1:8b": {
+      "size_gb": 4.7,
+      "min_vram_gb": 5,
+      "min_ram_gb": 8,
+      "fits_cpu": false,
+      "capabilities": {
+        "json_reliable": 0.78,
+        "tool_calling": true,
+        "reasoning_score": 0.76,
+        "code_generation": 0.7
+      },
+      "best_for": ["architect", "explainer"],
+      "ollama_id": "llama3.1:8b",
+      "license": "llama"
+    },
+    "tinyllama": {
+      "size_gb": 0.6,
+      "min_vram_gb": 0,
+      "min_ram_gb": 4,
+      "fits_cpu": true,
+      "capabilities": {
+        "json_reliable": 0.42,
+        "tool_calling": false,
+        "reasoning_score": 0.31,
+        "code_generation": 0.35
+      },
+      "best_for": [],
+      "not_good_for": ["architect", "extraction", "builder"],
+      "ollama_id": "tinyllama",
+      "license": "apache_2"
+    },
+    "nomic-embed-text": {
+      "size_gb": 0.27,
+      "min_vram_gb": 0,
+      "min_ram_gb": 2,
+      "fits_cpu": true,
+      "capabilities": {
+        "embeddings": true
+      },
+      "best_for": ["embeddings"],
+      "ollama_id": "nomic-embed-text",
+      "license": "apache_2"
+    }
+  },
+  "shipai_node_requirements": {
+    "interview_node": {
+      "minimum_json_reliable": 0.7,
+      "minimum_reasoning": 0.5,
+      "needs_tool_calling": false,
+      "priority": "speed"
+    },
+    "research_node": {
+      "minimum_reasoning": 0.75,
+      "minimum_json_reliable": 0.75,
+      "needs_tool_calling": false,
+      "priority": "quality"
+    },
+    "plan_node": {
+      "minimum_json_reliable": 0.9,
+      "needs_tool_calling": false,
+      "priority": "accuracy"
+    },
+    "explain_node": {
+      "minimum_reasoning": 0.5,
+      "minimum_json_reliable": 0.65,
+      "needs_tool_calling": false,
+      "priority": "speed"
+    },
+    "embeddings": {
+      "requires_embeddings": true,
+      "priority": "accuracy"
+    }
+  }
+}

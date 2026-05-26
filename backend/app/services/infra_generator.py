@@ -137,14 +137,38 @@ class InMemoryCache:
                 del self._cache[oldest]
 
     def get(self, prefix: str, data: str) -> Optional[Any]:
-        """Get cached value. Returns None on miss."""
+        """Get exact match cached value."""
         key = self._make_key(prefix, data)
         entry = self._cache.get(key)
         if entry and not self._is_expired(entry):
             entry["hits"] += 1
             return entry["value"]
         elif entry:
-            del self._cache[key]  # Clean expired
+            del self._cache[key]
+        return None
+
+class SemanticCache(InMemoryCache):
+    """
+    Semantic Cache using vector embeddings to find similar queries.
+    Saves LLM API costs by reusing answers for conceptually similar questions.
+    """
+    def __init__(self, max_size: int = 1000, ttl_seconds: int = 3600, threshold: float = 0.90):
+        super().__init__(max_size, ttl_seconds)
+        self.threshold = threshold
+        
+        # In production, initialize sentence-transformers or Chroma here
+        # self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
+        # self.vectors = []
+        
+    def semantic_get(self, query: str) -> Optional[Any]:
+        """
+        Stub: Generate embedding for query, compute cosine similarity 
+        against cached vectors. If similarity > threshold, return cached answer.
+        """
+        # query_emb = self.encoder.encode(query)
+        # for cached_item in self.vectors:
+        #     if cosine_similarity(query_emb, cached_item.embedding) > self.threshold:
+        #         return cached_item.answer
         return None
 
     def set(self, prefix: str, data: str, value: Any):

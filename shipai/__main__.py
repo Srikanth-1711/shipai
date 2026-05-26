@@ -8,6 +8,9 @@ Usage:
     python -m shipai activate <key>   # Activate license
     python -m shipai serve            # Start the backend server
     python -m shipai status           # Check system status
+    python -m shipai config           # Manage ShipAI config
+    python -m shipai insights         # View architectural decision insights
+    python -m shipai plan             # Detect env + assign models → ~/.shipai/model_plan.json
 """
 import sys
 import os
@@ -47,6 +50,12 @@ def main():
     elif command == "advisor":
         description = " ".join(args[1:]) if len(args) > 1 else None
         cmd_advisor(description)
+    elif command == "config":
+        cmd_config(args[1:])
+    elif command == "insights":
+        cmd_insights()
+    elif command == "plan":
+        cmd_plan()
     else:
         print(f"Unknown command: {command}")
         print_help()
@@ -69,7 +78,7 @@ def print_banner():
 def print_help():
     print("""
 COMMANDS:
-  install              First-time setup (check hardware, setup Ollama, pull models)
+  install              Setup Fleet: detect env, negotiate models, pull, save plan
   create <template>    Generate a new AI project from template
   templates            List available project templates
   models               List locally available LLM models
@@ -78,76 +87,71 @@ COMMANDS:
   activate <key>       Activate a license key
   serve                Start the ShipAI backend server
   status               Check system status
+  config               Set configuration values (e.g. --github-token)
+  insights             View intelligence loop insights and optimize patterns
+  plan                 Detect hardware/runtimes and write ~/.shipai/model_plan.json
 
 EXAMPLES:
   python -m shipai install
   python -m shipai create rag_chatbot
   python -m shipai advisor "I need a customer support chatbot"
   python -m shipai activate SK-P-abc123-xyz789
+  python -m shipai plan
 """)
 
 
-def cmd_install():
-    """First-time setup flow."""
-    print_banner()
-    print("[1/4] Checking hardware...")
+def _print_plan_summary(plan, pulled=None):
+    from app.install.model_plan import PLAN_PATH
 
-    from app.services.hardware_checker import check_hardware
-    hw = check_hardware()
-
-    print(f"  OS:     {hw.os_name} {hw.os_version}")
-    print(f"  CPU:    {hw.cpu_name} ({hw.cpu_cores_physical} cores)")
-    print(f"  RAM:    {hw.ram_total_gb} GB ({hw.ram_available_gb} GB available)")
-    if hw.gpu:
-        print(f"  GPU:    {hw.gpu.name} ({hw.gpu.vram_total_mb} MB VRAM)")
-    else:
-        print("  GPU:    None detected")
-    print(f"  Disk:   {hw.disk_free_gb} GB free")
-    print(f"  Tier:   {hw.tier_label}")
+    print(f"\nPlan saved: {PLAN_PATH}\n")
+    for node, asn in plan.node_assignments.items():
+        flag = "INSTALLED" if asn.status == "installed" else asn.status.upper()
+        print(f"  {node:<16} {asn.model or '-':<28} [{flag}, {asn.confidence}]")
+    if plan.embedding:
+        print(f"  {'embeddings':<16} {plan.embedding.model:<28} [installed]")
+    if pulled:
+        print(f"\nDownloaded this run: {', '.join(pulled)}")
+    if plan.models_to_download:
+        print("\nStill needed:")
+        for m in plan.models_to_download:
+            print(f"  ollama pull {m}")
+    if plan.warnings:
+        print("\nWarnings:")
+        for w in plan.warnings:
+            print(f"  ! {w}")
     print()
 
-    print("[2/4] Checking Ollama...")
-    import subprocess
-    try:
-        result = subprocess.run(["ollama", "--version"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            print(f"  Ollama: Installed ({result.stdout.strip()})")
-        else:
-            print("  Ollama: Not found. Please install from https://ollama.ai")
-            return
-    except FileNotFoundError:
-        print("  Ollama: Not found. Please install from https://ollama.ai")
-        return
 
-    print()
-    print("[3/4] Checking available models...")
+def _run_setup_fleet_cli(auto_pull: bool):
     import asyncio
-    from app.services.ollama_service import ollama_service
+    from app.setup.fleet import run_setup_fleet
 
-    models = asyncio.run(ollama_service.list_models())
-    if models:
-        print(f"  Found {len(models)} model(s):")
-        for m in models:
-            print(f"    - {m['name']} ({m['size_gb']} GB, {m['parameters']})")
+    def on_progress(agent: str, message: str) -> None:
+        print(f"  [{agent}] {message}")
+
+    print("ShipAI Setup Fleet\n")
+    print("  Scout -> Librarian -> Negotiator -> Acquirer -> Validator\n")
+    result = asyncio.run(run_setup_fleet(auto_pull=auto_pull, on_progress=on_progress))
+    if result.plan:
+        _print_plan_summary(result.plan, pulled=result.state.pulled_models)
+    if result.state.success:
+        print("Setup complete. Next: python -m shipai serve")
     else:
-        print("  No models found. Pulling recommended model...")
-        recommended = hw.recommended_models[0] if hw.recommended_models else "tinyllama"
-        print(f"  Pulling {recommended}...")
-        result = asyncio.run(ollama_service.pull_model(recommended))
-        print(f"  {result.get('status', 'done')}")
+        print("Setup finished with warnings — check plan and pull any missing models.")
+    print()
 
-    print()
-    print("[4/4] Setup complete!")
-    print()
-    print("  Recommended models for your hardware:")
-    for m in hw.recommended_models:
-        print(f"    - {m}")
-    print()
-    print("  Next steps:")
-    print("    python -m shipai serve        # Start the platform")
-    print("    python -m shipai templates    # See available templates")
-    print("    python -m shipai create rag_chatbot  # Create your first project!")
-    print()
+
+def cmd_plan():
+    """Detect environment and write model plan (no auto-download)."""
+    print("Negotiating models (no download)...")
+    print("(Installed = live Ollama API. Matrix scores = estimates until benchmarked.)\n")
+    _run_setup_fleet_cli(auto_pull=False)
+
+
+def cmd_install():
+    """First-time setup — full Setup Fleet including model downloads."""
+    print_banner()
+    _run_setup_fleet_cli(auto_pull=True)
 
 
 def cmd_create(template: str = None):
@@ -377,5 +381,40 @@ def cmd_advisor(description: str = None):
     print()
 
 
+def cmd_insights():
+    """View intelligence loop insights and pattern optimization."""
+    import asyncio
+    import json
+    from app.db.feedback_db import count_records, overall_rate, get_top_corrections
+    from app.engine.pattern_optimizer import optimize_patterns
+    
+    print("ShipAI Architectural Insights")
+    print("=" * 60)
+    print(f"Total Sessions Logged: {count_records()}")
+    print(f"Overall Acceptance Rate: {overall_rate() * 100:.1f}%\n")
+    
+    top = get_top_corrections()
+    if top:
+        print("Top User Corrections:")
+        for k, v in top.items():
+            print(f"  - {k} ({v} times)")
+        print()
+    else:
+        print("No user corrections logged yet.\n")
+        
+    print("Running Pattern Optimizer...")
+    print("(This takes a moment as it analyzes weak decisions against L4 engineering principles)\n")
+    
+    suggestions = asyncio.run(optimize_patterns())
+    if isinstance(suggestions, str):
+        print(suggestions)
+    else:
+        for s in suggestions:
+            print(f"Weak Decision Detected: {s['component']} ({s['chosen']})")
+            print(f"User Preferred: {s['preferred']} (Acceptance Rate: {s['acceptance_rate']*100:.1f}%)")
+            print("Suggested Rule Update:")
+            print(s['suggestion'])
+            print("-" * 60)
+            
 if __name__ == "__main__":
     main()

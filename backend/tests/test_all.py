@@ -174,7 +174,7 @@ class TestInfraGenerator:
         from app.services.infra_generator import TIER_PATTERNS
         assert len(TIER_PATTERNS["free"]) == 3
         assert len(TIER_PATTERNS["starter"]) == 5
-        assert len(TIER_PATTERNS["pro"]) == 7
+        assert len(TIER_PATTERNS["pro"]) == 9
 
     def test_get_infra_patterns_free(self):
         from app.services.infra_generator import get_infra_patterns
@@ -187,7 +187,7 @@ class TestInfraGenerator:
     def test_get_infra_patterns_pro(self):
         from app.services.infra_generator import get_infra_patterns
         patterns = get_infra_patterns("pro")
-        assert len(patterns) == 7
+        assert len(patterns) == 9
 
     def test_generate_infra_files(self, tmp_path):
         from app.services.infra_generator import generate_infra_files
@@ -198,12 +198,12 @@ class TestInfraGenerator:
     def test_generate_infra_files_pro(self, tmp_path):
         from app.services.infra_generator import generate_infra_files
         files = generate_infra_files(str(tmp_path), tier="pro")
-        assert len(files) == 7
+        assert len(files) == 10
 
     def test_get_infra_summary(self):
         from app.services.infra_generator import get_infra_summary
         summary = get_infra_summary("free")
-        assert len(summary) == 7  # all 7 patterns listed
+        assert len(summary) == 9  # all 9 patterns listed
         included = [s for s in summary if s["included"]]
         assert len(included) == 3
 
@@ -247,7 +247,7 @@ class TestTemplateEngine:
         )
         assert result["status"] == "success"
         assert result["files_generated"] > 0
-        assert (tmp_path / "test_bot" / "main.py").exists()
+        assert (tmp_path / "test_bot" / "backend" / "app" / "main.py").exists()
         assert (tmp_path / "test_bot" / "README.md").exists()
         assert (tmp_path / "test_bot" / "Dockerfile").exists()
         assert (tmp_path / "test_bot" / "requirements.txt").exists()
@@ -274,7 +274,7 @@ class TestTemplateEngine:
             tier="pro",
         )
         assert result["status"] == "success"
-        assert result["infra_patterns_included"] == 7  # pro = 7 patterns
+        assert result["infra_patterns_included"] == 9  # pro = 9 patterns
 
     @pytest.mark.asyncio
     async def test_generate_invalid_template(self):
@@ -350,7 +350,7 @@ class TestAPI:
         return TestClient(app)
 
     def test_root(self, client):
-        resp = client.get("/")
+        resp = client.get("/api")
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "ShipAI"
@@ -375,7 +375,7 @@ class TestAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert data["tier"] == "pro"
-        assert len(data["patterns"]) == 7
+        assert len(data["patterns"]) == 9
 
     def test_list_models(self, client):
         resp = client.get("/api/models/")
@@ -417,14 +417,17 @@ class TestAPI:
 
     def test_license_generate_and_validate(self, client):
         # Generate
-        resp = client.post("/api/license/generate", json={
-            "tier": "starter",
-            "email": "test@api.com",
-            "duration_days": 30,
-        })
-        assert resp.status_code == 200
-        key = resp.json()["key"]
-        assert key.startswith("SK-S-")
+        import os
+        headers = {"Authorization": "Bearer test_secret"}
+        with patch.dict(os.environ, {"SHIPAI_ADMIN_SECRET": "test_secret"}):
+            resp = client.post("/api/license/generate", headers=headers, json={
+                "tier": "starter",
+                "email": "test@api.com",
+                "duration_days": 30,
+            })
+            assert resp.status_code == 200
+            key = resp.json()["key"]
+            assert key.startswith("SK-S-")
 
         # Validate
         resp = client.post("/api/license/validate", json={"key": key})
