@@ -1,5 +1,4 @@
 from typing import TypedDict, List, Optional
-from langgraph.graph import StateGraph, END
 
 class SystemRequirements(TypedDict):
     # Discovery layer - free-form semantic descriptions captured from user conversation
@@ -30,7 +29,19 @@ class AgentState(TypedDict):
     # Decision (built during Pattern Matcher)
     selected_architecture: str
     config_json: dict
+
+    # Validation (between planner and builder)
+    config_validation_errors: List[str]
     
+    # Build output (Builder node)
+    generated_files: List[str]  # Relative file paths inside project_path
+    build_error: str            # Non-empty if codegen failed
+
+    # Verification output (Verifier node)
+    verification_report: dict    # VerificationReport.to_dict()
+    verification_failed: bool
+    verification_metrics: dict
+
     # Output
     explanation: str         # Explainer agent output
     project_path: str        # Where the generated project lives

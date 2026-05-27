@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 PLAN_PATH = Path.home() / ".shipai" / "model_plan.json"
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 @dataclass
@@ -16,10 +16,13 @@ class NodeAssignment:
     model: str
     runtime: str
     base_url: Optional[str] = None
-    status: str = "installed"  # installed | needs_download | cloud_required | insufficient_hardware
-    confidence: str = "installed_verified"  # installed_verified | installed_unknown | matrix_estimate
+    status: str = "installed"
+    confidence: str = "installed_verified"
     quality_score: float = 0.0
     reason: str = ""
+    role: str = ""
+    gemini_reasoning: str = ""
+    user_suggested: bool = False
 
 
 @dataclass
@@ -33,6 +36,11 @@ class ModelPlan:
     models_to_download: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    final_three: Dict[str, str] = field(default_factory=dict)
+    top10_candidates: List[Dict[str, Any]] = field(default_factory=list)
+    use_case_profile: Dict[str, Any] = field(default_factory=dict)
+    user_suggestions: Dict[str, str] = field(default_factory=dict)
+    gemini_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -55,6 +63,12 @@ def save_model_plan(plan: ModelPlan, path: Path | None = None) -> Path:
     return path
 
 
+def _assignment_from_dict(v: dict) -> NodeAssignment:
+    known = {f.name for f in NodeAssignment.__dataclass_fields__.values()}
+    filtered = {k: v[k] for k in v if k in known}
+    return NodeAssignment(**filtered)
+
+
 def load_model_plan(path: Path | None = None) -> ModelPlan | None:
     path = path or PLAN_PATH
     if not path.is_file():
@@ -63,16 +77,21 @@ def load_model_plan(path: Path | None = None) -> ModelPlan | None:
         raw = json.load(f)
     nodes = {}
     for k, v in raw.get("node_assignments", {}).items():
-        nodes[k] = NodeAssignment(**v)
+        nodes[k] = _assignment_from_dict(v) if isinstance(v, dict) else v
     emb = raw.get("embedding")
     return ModelPlan(
         schema_version=raw.get("schema_version", "1"),
         generated_at=raw.get("generated_at", ""),
         primary_runtime=raw.get("primary_runtime", "none"),
         runtime_base_url=raw.get("runtime_base_url"),
-        embedding=NodeAssignment(**emb) if emb else None,
+        embedding=_assignment_from_dict(emb) if emb else None,
         node_assignments=nodes,
         models_to_download=list(raw.get("models_to_download", [])),
         warnings=list(raw.get("warnings", [])),
         metadata=dict(raw.get("metadata", {})),
+        final_three=dict(raw.get("final_three", {})),
+        top10_candidates=list(raw.get("top10_candidates", [])),
+        use_case_profile=dict(raw.get("use_case_profile", {})),
+        user_suggestions=dict(raw.get("user_suggestions", {})),
+        gemini_enabled=bool(raw.get("gemini_enabled", False)),
     )

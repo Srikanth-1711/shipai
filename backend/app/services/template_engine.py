@@ -573,48 +573,20 @@ Run `python evaluate.py` to evaluate your RAG pipeline using RAGAS.
 """
         self._write_file(project_dir / "README.md", readme_content)
 
-TEMPLATE_REGISTRY = {
-    "rag_chatbot": {
-        "name": "RAG Chatbot",
-        "description": "Production-ready chatbot powered by RAG.",
-        "category": "rag",
-        "icon": "📚",
-        "tier": "free",
-        "inputs": ["project_name"]
-    },
-    "multi_agent": {
-        "name": "Multi-Agent System",
-        "description": "Multi-agent orchestration flow.",
-        "category": "agent",
-        "icon": "🤖",
-        "tier": "starter",
-        "inputs": ["project_name"]
-    },
-    "data_analyzer": {
-        "name": "Data Analyzer",
-        "description": "Log analysis and metrics RAG analyzer.",
-        "category": "data",
-        "icon": "📊",
-        "tier": "pro",
-        "inputs": ["project_name"]
-    }
-}
-
 def list_templates(tier: str = None) -> list[dict]:
-    templates = []
-    for k, v in TEMPLATE_REGISTRY.items():
-        v["id"] = k
-        templates.append(v)
-    return templates
+    from app.services.template_registry import REGISTRY
+
+    return REGISTRY.list_templates(tier=tier)
 
 def get_template(template_id: str) -> dict | None:
-    t = TEMPLATE_REGISTRY.get(template_id)
-    if t:
-        t["id"] = template_id
-    return t
+    from app.services.template_registry import REGISTRY
+
+    return REGISTRY.get_template(template_id)
 
 async def generate_project(template_id: str, config: dict, output_dir: str | None = None, tier: str = "free") -> dict:
-    if template_id not in TEMPLATE_REGISTRY:
+    from app.services.template_registry import REGISTRY
+
+    if not REGISTRY.exists(template_id):
         return {"error": f"Template '{template_id}' not found"}
     config["template"] = template_id
     config["infra_tier"] = config.get("infra_tier") or (

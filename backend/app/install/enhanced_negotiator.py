@@ -69,6 +69,7 @@ class EnhancedNegotiator:
             models_to_download=list(base_result.models_to_download),
             warnings=list(base_result.warnings),
             gemini_enabled=self.use_gemini,
+            metadata={"enhanced_negotiator": True},
         )
 
         # Step 3: Apply user suggestions
@@ -97,8 +98,8 @@ class EnhancedNegotiator:
                 suggested_model=suggested_model,
                 hardware_specs={
                     "ram_gb": hw.ram_total_gb,
-                    "gpu": hw.gpu.name if hw.gpu else "none",
-                    "gpu_vram_gb": hw.gpu_vram_free_gb if hw.gpu else 0,
+                    "gpu": hw.gpu_name or "none",
+                    "gpu_vram_gb": hw.gpu_vram_free_gb,
                 },
                 available_models=list(self.matrix.get("models", {}).keys()),
             ) if self.use_gemini else {"valid": True, "reasoning": "Validation skipped"}
@@ -136,9 +137,9 @@ class EnhancedNegotiator:
         hw_specs = {
             "ram_gb": hw.ram_total_gb,
             "ram_available_gb": hw.ram_available_gb,
-            "gpu": hw.gpu.name if hw.gpu else "none",
-            "gpu_vram_gb": hw.gpu_vram_free_gb if hw.gpu else 0,
-            "tier": hw.profile_tier,
+            "gpu": hw.gpu_name or "none",
+            "gpu_vram_gb": hw.gpu_vram_free_gb,
+            "effective_vram_gb": getattr(hw, "effective_vram_gb", 0),
         }
 
         for node, assignment in plan.node_assignments.items():

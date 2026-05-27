@@ -1,0 +1,5 @@
+{
+  "min_quality_score": 80.0,
+  "require_smoke_test": true
+}
+

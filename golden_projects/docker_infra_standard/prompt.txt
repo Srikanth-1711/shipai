@@ -1,0 +1,2 @@
+Build a deployable FastAPI service with docker-compose, standard infra (include redis). No reranker.
+

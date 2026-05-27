@@ -108,13 +108,18 @@ async def get_current_plan():
         raise HTTPException(status_code=404, detail="No model plan found. Run 'shipai install' first.")
 
     return {
+        "schema_version": plan.schema_version,
         "primary_runtime": plan.primary_runtime,
+        "final_three": plan.final_three,
+        "top10_candidates": plan.top10_candidates[:10],
+        "use_case_profile": plan.use_case_profile,
         "embedding": plan.embedding.model if plan.embedding else None,
         "node_assignments": {
             node: {
                 "model": asn.model,
                 "status": asn.status,
                 "confidence": asn.confidence,
+                "role": asn.role,
                 "reason": asn.reason,
                 "gemini_reasoning": asn.gemini_reasoning,
                 "user_suggested": asn.user_suggested,

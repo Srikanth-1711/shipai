@@ -44,6 +44,9 @@ class HardwareProfile:
     has_cuda: bool = False
     is_apple_silicon: bool = False
     unified_memory_gb: Optional[float] = None
+    effective_vram_gb: float = 0.0
+    effective_ram_gb: float = 0.0
+    max_model_params_b: float = 0.0
 
 
 @dataclass

@@ -1,14 +1,36 @@
 import json
-from langgraph.graph import StateGraph, END
-from langchain_community.chat_models import ChatOllama
-from langchain_core.messages import SystemMessage
+import os
+import time
+try:
+    from langgraph.graph import StateGraph, END  # type: ignore
+    from langgraph.checkpoint.memory import MemorySaver  # type: ignore
+    _LANGGRAPH_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover
+    StateGraph = None  # type: ignore
+    END = None  # type: ignore
+    MemorySaver = None  # type: ignore
+    _LANGGRAPH_AVAILABLE = False
+
+try:
+    from langchain_community.chat_models import ChatOllama  # type: ignore
+    from langchain_core.messages import SystemMessage  # type: ignore
+    _LANGCHAIN_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover
+    ChatOllama = None  # type: ignore
+    SystemMessage = None  # type: ignore
+    _LANGCHAIN_AVAILABLE = False
 from app.engine.state import AgentState
 from app.config import settings
 from app.install.llm_config import get_node_model
+from app.contracts.config_schema import validate_config
+from app.verification.project_verifier import verify_project
+from app.verification.quality_metrics import score_verification
 
 # Node Stubs
 def interview_node(state: AgentState):
     """Discovery Question Tree: Asks questions until requirements are met."""
+    if not _LANGCHAIN_AVAILABLE or ChatOllama is None:
+        raise RuntimeError("interview_node requires 'langchain' runtime dependencies")
     llm = ChatOllama(model=get_node_model("interview_node"), temperature=0.1)
     messages = state.get("messages", [])
     
@@ -293,11 +315,259 @@ def plan_node(state: AgentState):
     # The new RAG decision matrix handles the complex mapping and rationale
     return run_decision_matrix(state)
 
+def config_validator_node(state: AgentState):
+    """Validate config_json from planner using strict ConfigV1 schema.
+
+    Never raises; on error, records validation_errors and lets the graph complete.
+    """
+    raw = state.get("config_json", {}) or {}
+    cfg, errors = validate_config(raw)
+    if errors or not cfg:
+        # Keep the raw config so the user can still see what the planner tried to do.
+        return {
+            "config_json": raw,
+            "config_validation_errors": errors,
+        }
+
+    # Capability-aware post-processing (hardware-aware overrides).
+    # This keeps the planner LLM-free from hardware concerns while still adapting
+    # to the actual machine capabilities discovered during install.
+    try:
+        from app.install.model_plan import load_model_plan
+
+        plan = load_model_plan()
+        hw = (plan.metadata.get("hardware") if plan and plan.metadata else {}) if plan else {}
+        embedding_model = plan.embedding.model if (plan and plan.embedding) else None
+
+        def _to_float(x: object) -> float | None:
+            try:
+                return float(x)  # type: ignore[arg-type]
+            except Exception:
+                return None
+
+        effective_vram = _to_float(hw.get("effective_vram_gb"))
+        effective_ram = _to_float(hw.get("effective_ram_gb"))
+
+        # Helper: keep `decisions[*].choice` in sync with overridden component values.
+        decisions = cfg.get("decisions") if isinstance(cfg, dict) else {}
+        if not isinstance(decisions, dict):
+            decisions = {}
+            cfg["decisions"] = decisions
+
+        def sync_choice(component_key: str) -> None:
+            if component_key in cfg and component_key in decisions and isinstance(decisions[component_key], dict):
+                decisions[component_key]["choice"] = cfg[component_key]
+
+        # If no embedding model exists, prefer sparse retrieval to avoid dense-only stacks.
+        if not embedding_model and cfg.get("search_type") in ("dense", "hybrid"):
+            cfg["search_type"] = "sparse"
+            sync_choice("search_type")
+
+        # Low VRAM safety rails: avoid heavyweight multi-agent / reranking / caching.
+        if effective_vram is not None and effective_vram < 4.0:
+            if cfg.get("template") == "multi_agent":
+                cfg["template"] = "rag_chatbot"
+            if cfg.get("framework") == "langgraph":
+                cfg["framework"] = "langchain"
+            if cfg.get("reranker") != "none":
+                cfg["reranker"] = "none"
+            if cfg.get("cache") != "none":
+                cfg["cache"] = "none"
+            if cfg.get("infra_tier") != "minimal":
+                cfg["infra_tier"] = "minimal"
+            if cfg.get("vector_db") != "chroma":
+                cfg["vector_db"] = "chroma"
+            if cfg.get("search_type") == "hybrid":
+                cfg["search_type"] = "dense"
+
+            for k in ["framework", "vector_db", "search_type", "reranker", "cache", "infra_tier"]:
+                sync_choice(k)
+
+        # Slightly higher-end machine: allow standard infra if VRAM is healthy.
+        if effective_vram is not None and effective_vram >= 6.0 and cfg.get("infra_tier") == "minimal":
+            cfg["infra_tier"] = "standard"
+            if cfg.get("cache") == "none":
+                cfg["cache"] = "redis"
+            sync_choice("infra_tier")
+            sync_choice("cache")
+
+        # Re-validate final cfg shape/options after overrides.
+        cfg2, errors2 = validate_config(cfg)
+        if not errors2 and cfg2:
+            cfg = cfg2
+    except Exception:
+        # Never block builder from generation because of override logic.
+        pass
+
+    return {"config_json": cfg, "config_validation_errors": []}
+
+def builder_node(state: AgentState):
+    """Builder / Engineer: Calls template_engine to generate the real project on disk."""
+    # Short-circuit if validation failed
+    validation_errors = state.get("config_validation_errors") or []
+    if validation_errors:
+        return {
+            "project_path": "",
+            "generated_files": [],
+            "build_error": "Config validation failed; see config_validation_errors.",
+        }
+
+    config = state.get("config_json", {})
+    if not config:
+        return {
+            "project_path": "",
+            "generated_files": [],
+            "build_error": "No config_json from plan_node — cannot generate project.",
+        }
+
+    try:
+        from app.services.template_engine import ShipAITemplateEngine
+        from app.engine.builder_utils import (
+            deterministic_output_dir,
+            safe_remove_output_dir,
+            build_manifest,
+            write_manifest,
+        )
+        from app.install.model_plan import load_model_plan
+
+        engine = ShipAITemplateEngine()
+        dry_run = str(os.getenv("SHIPAI_DRY_RUN", "")).lower() in ("1", "true", "yes")
+        output_dir = deterministic_output_dir(config)
+        if dry_run:
+            temp_base = Path(os.getenv("TEMP") or Path.cwd())
+            temp_base = temp_base / "shipai_dryrun_projects"
+            output_dir = deterministic_output_dir(config, base_dir=temp_base)
+        safe_remove_output_dir(output_dir)
+
+        project_path = engine.generate_project(config, output_dir=str(output_dir))
+
+        # Load model_plan context for reproducibility / debugging.
+        plan = load_model_plan()
+        model_plan_summary = {}
+        if plan:
+            model_plan_summary = {
+                "primary_runtime": plan.primary_runtime,
+                "final_three": plan.final_three,
+                "embedding": plan.embedding.model if plan.embedding else None,
+                "node_assignments": {
+                    k: {
+                        "model": v.model,
+                        "runtime": v.runtime,
+                        "status": v.status,
+                        "role": v.role,
+                    }
+                    for k, v in plan.node_assignments.items()
+                }
+                if plan.node_assignments
+                else {},
+            }
+
+        # Hash the exact config snapshot we validated.
+        from app.engine.builder_utils import compute_config_hash, canonical_json
+
+        config_hash = compute_config_hash(config)
+
+        # Collect all real files (relative paths from project root)
+        root = Path(project_path)
+        files = []
+        for f in root.rglob("*"):
+            if f.is_file() and "__pycache__" not in str(f):
+                files.append(str(f.relative_to(root)))
+
+        manifest = build_manifest(
+            project_path=root,
+            config=config,
+            config_hash=config_hash,
+            shipai_version=settings.APP_VERSION,
+            generated_files=files,
+            model_plan_summary=model_plan_summary,
+        )
+        write_manifest(root, manifest)
+
+        return {
+            "project_path": project_path,
+            "generated_files": files,
+            "build_error": "",
+        }
+    except Exception as exc:
+        return {
+            "project_path": "",
+            "generated_files": [],
+            "build_error": str(exc),
+        }
+
+def verifier_node(state: AgentState):
+    """Project Verifier: static verification of generated project artifacts."""
+    build_error = state.get("build_error") or ""
+    project_path = state.get("project_path") or ""
+
+    # Build errors: mark verification as failed but do not crash.
+    if build_error:
+        report = {
+            "syntax_valid": False,
+            "imports_valid": False,
+            "structure_valid": False,
+            "dependency_valid": False,
+            "manifest_valid": False,
+            "smoke_test_valid": False,
+            "runtime_validation_score": 0.0,
+            "semantic_warnings": [],
+            "errors": [f"Build error: {build_error}"],
+            "warnings": [],
+            "verified_files": [],
+            "verification_duration_ms": 0,
+        }
+        return {
+            "project_path": project_path,
+            "verification_report": report,
+            "verification_metrics": score_verification(report),
+            "verification_failed": True,
+            "reality_test_failed": True,
+        }
+
+    if not project_path:
+        report = {
+            "syntax_valid": False,
+            "imports_valid": False,
+            "structure_valid": False,
+            "dependency_valid": False,
+            "manifest_valid": False,
+            "smoke_test_valid": False,
+            "runtime_validation_score": 0.0,
+            "semantic_warnings": [],
+            "errors": ["project_path missing; cannot verify"],
+            "warnings": [],
+            "verified_files": [],
+            "verification_duration_ms": 0,
+        }
+        return {
+            "project_path": project_path,
+            "verification_report": report,
+            "verification_metrics": score_verification(report),
+            "verification_failed": True,
+            "reality_test_failed": True,
+        }
+
+    report_obj = verify_project(project_path)
+    report = report_obj.to_dict()
+    return {
+        "project_path": project_path,
+        "verification_report": report,
+        "verification_metrics": score_verification(report),
+        "verification_failed": report_obj.failed,
+        "reality_test_failed": not bool(report.get("smoke_test_valid")),
+    }
+
+
 def explain_node(state: AgentState):
     """Explainer Agent: Translates the architecture decision into the user's language."""
+    if not _LANGCHAIN_AVAILABLE or ChatOllama is None:
+        raise RuntimeError("explain_node requires 'langchain' runtime dependencies")
     requirements = state.get("requirements", {})
     config = state.get("config_json", {})
     user_level = requirements.get("user_level", "junior_dev")
+    verification_report = state.get("verification_report") or {}
+    verification_failed = bool(state.get("verification_failed"))
     
     llm = ChatOllama(model=get_node_model("explain_node"), temperature=0.5)
     
@@ -310,7 +580,29 @@ def explain_node(state: AgentState):
         "architect": "Be deeply technical. Discuss why alternatives were rejected, scaling implications, and failure modes.",
     }
     instruction = level_instructions.get(user_level, level_instructions["junior_dev"])
-    
+
+    verification_block = ""
+    if verification_report:
+        errs = verification_report.get("errors", []) or []
+        warns = verification_report.get("warnings", []) or []
+        verified_files = verification_report.get("verified_files", []) or []
+        verification_block = f"""
+
+Verification summary:
+- failed: {verification_failed}
+- syntax_valid: {verification_report.get('syntax_valid')}
+- structure_valid: {verification_report.get('structure_valid')}
+- dependency_valid: {verification_report.get('dependency_valid')}
+- manifest_valid: {verification_report.get('manifest_valid')}
+- smoke_test_valid: {verification_report.get('smoke_test_valid')}
+- runtime_validation_score: {verification_report.get('runtime_validation_score')}
+- verified_files: {len(verified_files)}
+- warnings: {len(warns)}
+- errors: {len(errs)}
+"""
+        if errs:
+            verification_block += "\nTop errors:\n" + "\n".join([f"- {e}" for e in errs[:5]])
+
     explain_prompt = f"""You are ShipAI's Explainer Agent. A project was just generated with these settings:
 
 Architecture: {config.get('template', '?')}
@@ -321,6 +613,8 @@ Reranker: {config.get('reranker', '?')}
 Cache: {config.get('cache', '?')}
 PII Protection: {config.get('pii', '?')}
 Infrastructure: {config.get('infra_tier', '?')}
+
+{verification_block}
 
 Decision Reasoning:
 {json.dumps(config.get('decisions', {}), indent=2)}
@@ -333,9 +627,9 @@ Write a clear explanation of what was built and why. 200-300 words:"""
     resp = llm.invoke(explain_prompt)
     explanation = resp.content if hasattr(resp, "content") else str(resp)
     
+    # Keep the real project_path from builder_node (don't overwrite with placeholder)
     return {
         "explanation": explanation,
-        "project_path": f"./generated/{config.get('template', 'project')}",
     }
 
 # Edge Routers
@@ -351,25 +645,35 @@ def route_from_research(state: AgentState):
         return "plan_node"
     return "research_node"  # Self-correction loop
 
-# Build Graph
-workflow = StateGraph(AgentState)
+# Build Graph (optional dependency gated)
+workflow = None
+app_brain = None
+if _LANGGRAPH_AVAILABLE and StateGraph is not None:
+    workflow = StateGraph(AgentState)
 
-workflow.add_node("interview_node", interview_node)
-workflow.add_node("research_node", research_node)
-workflow.add_node("plan_node", plan_node)
-workflow.add_node("explain_node", explain_node)
+    workflow.add_node("interview_node", interview_node)
+    workflow.add_node("research_node", research_node)
+    workflow.add_node("plan_node", plan_node)
+    workflow.add_node("config_validator_node", config_validator_node)
+    workflow.add_node("builder_node", builder_node)
+    workflow.add_node("verifier_node", verifier_node)
+    workflow.add_node("explain_node", explain_node)
 
-workflow.set_entry_point("interview_node")
-workflow.add_conditional_edges("interview_node", route_from_interview)
-workflow.add_conditional_edges("research_node", route_from_research)
-workflow.add_edge("plan_node", "explain_node")
-workflow.add_edge("explain_node", END)
+    workflow.set_entry_point("interview_node")
+    workflow.add_conditional_edges("interview_node", route_from_interview)
+    workflow.add_conditional_edges("research_node", route_from_research)
+    workflow.add_edge("plan_node", "config_validator_node")
+    workflow.add_edge("config_validator_node", "builder_node")
+    workflow.add_edge("builder_node", "verifier_node")
+    workflow.add_edge("verifier_node", "explain_node")
+    workflow.add_edge("explain_node", END)
 
-from langgraph.checkpoint.memory import MemorySaver
-
-# In production, we attach a checkpointer here (e.g., Redis or SQLite)
-memory = MemorySaver()
-app_brain = workflow.compile(checkpointer=memory)
+    # In production, we attach a checkpointer here (e.g., Redis or SQLite)
+    if MemorySaver is not None:
+        memory = MemorySaver()
+        app_brain = workflow.compile(checkpointer=memory)
+    else:
+        app_brain = workflow.compile()
 
 from dataclasses import dataclass
 from typing import AsyncGenerator, Any
@@ -382,6 +686,12 @@ class WSEventType(str, Enum):
     REQUIREMENT   = "requirement"
     DECISION      = "decision"
     FILE_GENERATED = "file_generated"
+    VERIFICATION_STARTED = "verification_started"
+    VERIFICATION_COMPLETE = "verification_complete"
+    VERIFICATION_FAILED = "verification_failed"
+    REALITY_TEST_STARTED = "reality_test_started"
+    REALITY_TEST_COMPLETE = "reality_test_complete"
+    REALITY_TEST_FAILED = "reality_test_failed"
     COMPLETE      = "complete"
     ERROR         = "error"
 
@@ -397,7 +707,10 @@ class WSEvent:
 AGENT_CONFIG = {
     "interview_node": {"color": "blue",   "label": "Discovery Agent"},
     "research_node":  {"color": "purple", "label": "Architect Agent"},
-    "plan_node":      {"color": "green",  "label": "Builder Agent"},
+    "plan_node":      {"color": "green",  "label": "Planner Agent"},
+    "config_validator_node": {"color": "yellow", "label": "Validator Agent"},
+    "builder_node":   {"color": "orange", "label": "Engineer Agent"},
+    "verifier_node":  {"color": "red",    "label": "Project Verifier"},
     "explain_node":   {"color": "cyan",   "label": "Explainer Agent"},
 }
 
@@ -427,6 +740,28 @@ async def stream_graph(user_input: str, session_id: str) -> AsyncGenerator[WSEve
     This is what the WebSocket endpoint consumes.
     """
     
+    if app_brain is None:
+        # Optional runtime dependencies (langgraph/langchain) not installed.
+        yield WSEvent(
+            type=WSEventType.ERROR,
+            payload={
+                "message": "ShipAI chat runtime unavailable: optional dependency 'langgraph' is not installed.",
+                "session_id": session_id,
+            },
+        )
+        return
+
+    if not _LANGCHAIN_AVAILABLE:
+        yield WSEvent(
+            type=WSEventType.ERROR,
+            payload={
+                "message": "ShipAI chat runtime unavailable: optional dependency 'langchain' is not installed.",
+                "session_id": session_id,
+            },
+        )
+        return
+
+    start_ts = time.perf_counter()
     input_data = load_or_create_state(session_id, user_input)
     config = {"configurable": {"thread_id": session_id}}
     
@@ -486,40 +821,127 @@ async def stream_graph(user_input: str, session_id: str) -> AsyncGenerator[WSEve
                             }
                         )
             
-            # 5. Emit file generation events
-            if "project_path" in node_output:
-                project_path = node_output["project_path"]
-                if project_path:
-                    files = list_generated_files(project_path)
-                    for file_path in files:
+            # 5. Emit file generation events from builder_node
+            if "generated_files" in node_output:
+                project_path = node_output.get("project_path", "")
+                build_error = node_output.get("build_error", "")
+                if build_error:
+                    yield WSEvent(
+                        type=WSEventType.ERROR,
+                        payload={"message": f"Build error: {build_error}"}
+                    )
+                else:
+                    for rel_path in node_output["generated_files"]:
+                        fp = Path(rel_path)
                         yield WSEvent(
                             type=WSEventType.FILE_GENERATED,
                             payload={
-                                "path": str(file_path),
-                                "name": file_path.name,
-                                "highlighted": is_key_file(file_path)
+                                "path": str(Path(project_path) / rel_path),
+                                "name": fp.name,
+                                "highlighted": is_key_file(fp),
                             }
                         )
+
+            # 6. Emit verification + reality test events from verifier_node
+            if "verification_report" in node_output:
+                verification_report = node_output.get("verification_report") or {}
+                verification_failed = bool(node_output.get("verification_failed"))
+                verification_metrics = node_output.get("verification_metrics") or {}
+                reality_failed = bool(node_output.get("reality_test_failed"))
+
+                yield WSEvent(
+                    type=WSEventType.VERIFICATION_STARTED,
+                    payload={"project_path": node_output.get("project_path", None)},
+                )
+
+                yield WSEvent(
+                    type=WSEventType.REALITY_TEST_STARTED,
+                    payload={"project_path": node_output.get("project_path", None)},
+                )
+
+                if reality_failed:
+                    yield WSEvent(
+                        type=WSEventType.REALITY_TEST_FAILED,
+                        payload={
+                            "smoke_test_valid": verification_report.get("smoke_test_valid"),
+                            "runtime_validation_score": verification_report.get(
+                                "runtime_validation_score"
+                            ),
+                            "semantic_warnings": verification_report.get("semantic_warnings", []),
+                            "metrics": verification_metrics,
+                        },
+                    )
+                else:
+                    yield WSEvent(
+                        type=WSEventType.REALITY_TEST_COMPLETE,
+                        payload={
+                            "smoke_test_valid": True,
+                            "runtime_validation_score": verification_report.get(
+                                "runtime_validation_score"
+                            ),
+                            "metrics": verification_metrics,
+                        },
+                    )
+
+                if verification_failed:
+                    yield WSEvent(
+                        type=WSEventType.VERIFICATION_FAILED,
+                        payload={
+                            "summary": {
+                                "syntax_valid": verification_report.get("syntax_valid"),
+                                "structure_valid": verification_report.get("structure_valid"),
+                                "dependency_valid": verification_report.get("dependency_valid"),
+                                "manifest_valid": verification_report.get("manifest_valid"),
+                                "imports_valid": verification_report.get("imports_valid"),
+                                "smoke_test_valid": verification_report.get("smoke_test_valid"),
+                            },
+                            "errors_count": len(verification_report.get("errors", []) or []),
+                            "warnings_count": len(verification_report.get("warnings", []) or []),
+                            "metrics": verification_metrics,
+                        },
+                    )
+                else:
+                    yield WSEvent(
+                        type=WSEventType.VERIFICATION_COMPLETE,
+                        payload={
+                            "summary": {
+                                "syntax_valid": verification_report.get("syntax_valid"),
+                                "structure_valid": verification_report.get("structure_valid"),
+                                "dependency_valid": verification_report.get("dependency_valid"),
+                                "manifest_valid": verification_report.get("manifest_valid"),
+                                "imports_valid": verification_report.get("imports_valid"),
+                                "smoke_test_valid": verification_report.get("smoke_test_valid"),
+                            },
+                            "verified_files": len(verification_report.get("verified_files", []) or []),
+                            "metrics": verification_metrics,
+                        },
+                    )
     
     # 6. Final complete event
     final_state = app_brain.get_state(config).values
     if final_state.get("requirements_complete") and final_state.get("explanation"):
+        total_duration_ms = int((time.perf_counter() - start_ts) * 1000)
         yield WSEvent(
             type=WSEventType.COMPLETE,
             payload={
                 "project_path": final_state.get("project_path", ""),
                 "config_json": final_state.get("config_json", {}),
                 "explanation": final_state.get("explanation", ""),
-                "session_id": session_id
+                "verification_report": final_state.get("verification_report", {}),
+                "verification_metrics": final_state.get("verification_metrics", {}),
+                "session_id": session_id,
+                "total_duration_ms": total_duration_ms,
             }
         )
     else:
+        total_duration_ms = int((time.perf_counter() - start_ts) * 1000)
         yield WSEvent(
             type=WSEventType.COMPLETE,
             payload={
                 "project_path": None,
                 "config_json": None,
                 "explanation": None,
-                "session_id": session_id
+                "session_id": session_id,
+                "total_duration_ms": total_duration_ms,
             }
         )

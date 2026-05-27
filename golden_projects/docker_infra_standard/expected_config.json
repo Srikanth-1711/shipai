@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "project_type": "rag_chatbot",
+  "template": "rag_chatbot",
+  "framework": "langchain",
+  "vector_db": "chroma",
+  "search_type": "dense",
+  "reranker": "none",
+  "pii": "none",
+  "cache": "redis",
+  "infra_tier": "standard",
+  "decisions": {}
+}
+

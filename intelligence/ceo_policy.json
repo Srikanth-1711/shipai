@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "updated": "2026-05-24",
+  "flagship_multi_agent": "qwen3:4b",
+  "approved_families": ["qwen", "gemma", "llama", "mistral", "phi", "deepseek", "nomic", "smollm"],
+  "banned": ["tinyllama"],
+  "family_boost": 0.12,
+  "flagship_boost": 0.18,
+  "role_preferences": {
+    "fast": {
+      "prefer": ["phi", "smollm", "gemma2:2b", "tiny"],
+      "max_params_b": 4
+    },
+    "medium": {
+      "prefer": ["qwen2.5", "llama3.2", "mistral", "gemma2"],
+      "max_params_b": 8
+    },
+    "heavy": {
+      "prefer": ["qwen3", "deepseek-r1", "gemma2:9b", "llama3.1"],
+      "max_params_b": 14
+    },
+    "embed": {
+      "prefer": ["nomic-embed", "mxbai-embed", "bge"]
+    }
+  },
+  "notes": "ShipAI CEO policy — edit weekly. flagship = default heavy slot for multi-agent stacks."
+}

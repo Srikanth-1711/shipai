@@ -12,6 +12,7 @@ import os
 
 from app.config import settings
 from app.routes import system, models, advisor, templates, license, auth, projects, model_suggestions
+from app.runtime.capabilities import summarize_capabilities
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +29,13 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} starting...")
     logger.info(f"📡 Ollama endpoint: {settings.OLLAMA_BASE_URL}")
+    caps = summarize_capabilities()
+    logger.info(
+        "🔧 Runtime capabilities: required_ok=%s optional=%s/%s",
+        caps["required_ok"],
+        caps["optional_available"],
+        caps["optional_total"],
+    )
 
     # Initialize Database
     try:

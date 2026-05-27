@@ -2,8 +2,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from uuid import uuid4
 import asyncio
 
-from app.engine.orchestrator import stream_graph, WSEventType
-
 router = APIRouter()
 
 active_sessions = {}
@@ -17,6 +15,10 @@ async def chat_ws(websocket: WebSocket):
     await websocket.accept()
     session_id = str(uuid4())
     active_sessions[session_id] = websocket
+
+    # Lazy import so backend can start even when optional runtime deps
+    # (langgraph/langchain) are not installed.
+    from app.engine.orchestrator import stream_graph, WSEventType
     
     try:
         while True:

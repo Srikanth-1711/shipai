@@ -65,7 +65,7 @@ def detect_hardware_profile() -> HardwareProfile:
     if apple:
         unified = ram_total_gb
 
-    return HardwareProfile(
+    profile = HardwareProfile(
         os_name=os_name,
         os_version=os_version,
         architecture=architecture,
@@ -84,3 +84,22 @@ def detect_hardware_profile() -> HardwareProfile:
         is_apple_silicon=apple,
         unified_memory_gb=unified,
     )
+    return enrich_hardware_budget(profile)
+
+
+def enrich_hardware_budget(hw: HardwareProfile) -> HardwareProfile:
+    """Attach compute budget fields used by feasibility + fusion scorer."""
+    if hw.is_apple_silicon and hw.unified_memory_gb:
+        eff_vram = max(hw.unified_memory_gb * 0.55, 0.5)
+    elif hw.has_gpu:
+        eff_vram = max(hw.gpu_vram_free_gb - 0.5, 0.25)
+    else:
+        eff_vram = 0.0
+
+    eff_ram = max(hw.ram_available_gb, hw.ram_total_gb * 0.85)
+    max_params = eff_vram / 0.6 if eff_vram > 0 else eff_ram / 1.2
+
+    object.__setattr__(hw, "effective_vram_gb", round(eff_vram, 2))
+    object.__setattr__(hw, "effective_ram_gb", round(eff_ram, 2))
+    object.__setattr__(hw, "max_model_params_b", round(max_params, 2))
+    return hw

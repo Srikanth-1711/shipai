@@ -104,13 +104,24 @@ def _print_plan_summary(plan, pulled=None):
     from app.install.model_plan import PLAN_PATH
 
     print(f"\nPlan saved: {PLAN_PATH}\n")
+    if plan.final_three:
+        print("Final 3 roles:")
+        for role, mid in plan.final_three.items():
+            print(f"  {role:<8} {mid}")
+        print()
+    if plan.top10_candidates:
+        print("Top 10 candidates:")
+        for row in plan.top10_candidates[:10]:
+            print(f"  #{row.get('rank')} {row.get('model'):<24} score={row.get('score')} role={row.get('role')}")
+        print()
     for node, asn in plan.node_assignments.items():
-        flag = "INSTALLED" if asn.status == "installed" else asn.status.upper()
-        print(f"  {node:<16} {asn.model or '-':<28} [{flag}, {asn.confidence}]")
+        flag = asn.status.upper()
+        role = f" ({asn.role})" if asn.role else ""
+        print(f"  {node:<16} {asn.model or '-':<24}{role} [{flag}]")
     if plan.embedding:
-        print(f"  {'embeddings':<16} {plan.embedding.model:<28} [installed]")
+        print(f"  {'embeddings':<16} {plan.embedding.model:<24}")
     if pulled:
-        print(f"\nDownloaded this run: {', '.join(pulled)}")
+        print(f"\nDownloaded: {', '.join(pulled)}")
     if plan.models_to_download:
         print("\nStill needed:")
         for m in plan.models_to_download:
@@ -119,39 +130,62 @@ def _print_plan_summary(plan, pulled=None):
         print("\nWarnings:")
         for w in plan.warnings:
             print(f"  ! {w}")
+    if plan.gemini_enabled:
+        print("\n(Gemini explanations included in model_plan.json)")
     print()
 
 
-def _run_setup_fleet_cli(auto_pull: bool):
+def _parse_setup_args(argv):
+    import argparse
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--use-case", "-u", type=str, default="", help="Problem statement / use-case")
+    p.add_argument("--offline", action="store_true", help="Skip web fetch; matrix + CEO only")
+    p.add_argument("--explain", action="store_true", help="Gemini explanations (needs API key)")
+    ns, _ = p.parse_known_args(argv)
+    return ns
+
+
+def _run_setup_fleet_cli(auto_pull: bool, argv=None):
     import asyncio
     from app.setup.fleet import run_setup_fleet
+
+    ns = _parse_setup_args(argv or [])
 
     def on_progress(agent: str, message: str) -> None:
         print(f"  [{agent}] {message}")
 
-    print("ShipAI Setup Fleet\n")
-    print("  Scout -> Librarian -> Negotiator -> Acquirer -> Validator\n")
-    result = asyncio.run(run_setup_fleet(auto_pull=auto_pull, on_progress=on_progress))
+    print("ShipAI Fusion Install\n")
+    print("  CEO policy + web/matrix + hardware math + use-case\n")
+    print("  Scout -> Librarian -> Ranker -> Acquirer -> Validator\n")
+    if ns.offline:
+        print("  (offline mode - bundled matrix only)\n")
+    result = asyncio.run(
+        run_setup_fleet(
+            auto_pull=auto_pull,
+            use_case=ns.use_case or None,
+            offline=ns.offline,
+            use_gemini_explain=ns.explain,
+            on_progress=on_progress,
+        )
+    )
     if result.plan:
         _print_plan_summary(result.plan, pulled=result.state.pulled_models)
     if result.state.success:
         print("Setup complete. Next: python -m shipai serve")
     else:
-        print("Setup finished with warnings — check plan and pull any missing models.")
+        print("Setup finished with warnings.")
     print()
 
 
 def cmd_plan():
-    """Detect environment and write model plan (no auto-download)."""
-    print("Negotiating models (no download)...")
-    print("(Installed = live Ollama API. Matrix scores = estimates until benchmarked.)\n")
-    _run_setup_fleet_cli(auto_pull=False)
+    """Fusion model plan (no download)."""
+    _run_setup_fleet_cli(auto_pull=False, argv=sys.argv[2:])
 
 
 def cmd_install():
-    """First-time setup — full Setup Fleet including model downloads."""
+    """Full fusion setup with downloads."""
     print_banner()
-    _run_setup_fleet_cli(auto_pull=True)
+    _run_setup_fleet_cli(auto_pull=True, argv=sys.argv[2:])
 
 
 def cmd_create(template: str = None):
