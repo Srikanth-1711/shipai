@@ -254,7 +254,8 @@ def recommend_parallelism(
     """
     Returns (tensor_parallel_degree, pipeline_parallel_degree).
 
-    Fix 3 from review: PCIe never uses pipeline parallel for inference.
+    PCIe never uses pipeline parallel for inference — PCIe bandwidth is
+    too low for the constant cross-stage communication PP requires.
     PCIe prefers single GPU when model fits; tensor parallel when it doesn't.
     NVLink can use TP + PP combinations.
     """
@@ -274,7 +275,7 @@ def recommend_parallelism(
             pp = count // tp
             return tp, pp
     else:
-        # PCIe: prefer single GPU if model fits (Fix 3)
+        # PCIe: prefer single GPU if model fits (avoids slow cross-GPU transfer)
         if model_vram_needed_gb > 0 and single_gpu_vram >= model_vram_needed_gb:
             return 1, 1  # single GPU faster than PCIe multi-GPU
         # Must span: tensor parallel only (no pipeline parallel on PCIe)

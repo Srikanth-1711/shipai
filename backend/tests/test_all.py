@@ -27,17 +27,27 @@ class TestHardwareChecker:
 
     def test_hardware_tier_classification(self):
         from app.services.hardware_checker import _determine_tier
-        assert _determine_tier(ram_gb=64, vram_gb=40) == "ultra"
-        assert _determine_tier(ram_gb=32, vram_gb=12) == "high"
-        assert _determine_tier(ram_gb=16, vram_gb=4) == "standard"
-        assert _determine_tier(ram_gb=8, vram_gb=2) == "basic"
-        assert _determine_tier(ram_gb=4, vram_gb=0) == "minimal"
-        assert _determine_tier(ram_gb=2, vram_gb=0) == "minimal"
+        from app.install.types import HardwareProfile
+        
+        class MockProfile:
+            def __init__(self, tier):
+                self.scale_tier = tier
+                
+        def _mock_profile(tier):
+            return MockProfile(tier)
+            
+        assert _determine_tier(_mock_profile("hyperscale"))[0] == "ultra"
+        assert _determine_tier(_mock_profile("server"))[0] == "ultra"
+        assert _determine_tier(_mock_profile("workstation"))[0] == "high"
+        assert _determine_tier(_mock_profile("laptop"))[0] == "standard"
+        assert _determine_tier(_mock_profile("cpu_cluster"))[0] == "standard"
+        assert _determine_tier(_mock_profile("unknown"))[0] == "standard"
 
-    def test_recommended_models_not_empty(self):
+    def test_recommended_models_empty(self):
+        # Modern pipeline doesn't hardcode models in hardware_checker
         from app.services.hardware_checker import check_hardware
         hw = check_hardware()
-        assert len(hw.recommended_models) > 0
+        assert len(hw.recommended_models) == 0
 
     def test_hardware_has_disk_info(self):
         from app.services.hardware_checker import check_hardware

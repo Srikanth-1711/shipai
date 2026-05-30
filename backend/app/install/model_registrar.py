@@ -3,7 +3,7 @@ Model registrar: takes a model already on disk → makes it accessible via a run
 
 Handles:
   GGUF file → ollama create (via Modelfile) OR llama-server direct launch
-  HF cache  → detect GGUF inside → register; safetensors → fallback chain (Fix 2)
+  HF cache  → detect GGUF inside → register; safetensors → fallback chain
 """
 from __future__ import annotations
 
@@ -143,8 +143,7 @@ def register_hf_cache(
     """
     Register a HuggingFace cache directory with a runtime.
 
-    Fix 2 from plan review — safetensors → Ollama FROM is WRONG.
-    Correct fallback chain:
+    Safetensors cannot be loaded directly by Ollama — correct fallback chain:
     1. GGUF in cache?             → register_gguf_with_ollama
     2. Safetensors?               → map_hf_to_ollama_name → ollama pull
     3. Can't map?                 → find_gguf_repo → download GGUF

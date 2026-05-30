@@ -34,7 +34,7 @@ from app.install.vram_calculator import calculate_vram_gb
 
 logger = logging.getLogger("shipai.acquirer")
 
-# Validated repo ID pattern — Fix from plan review: blocks RCE via injection
+# Validated repo ID pattern — blocks shell injection / RCE via malicious repo names
 _HF_REPO_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.]+/[a-zA-Z0-9_\-\.]+$")
 
 # Default HF download target dir
@@ -56,14 +56,14 @@ class AcquisitionResult:
     warnings: List[str] = field(default_factory=list)
 
 
-# ── Fix 1: Model-aware quant selection ──────────────────────────────────────
+# ── Quant selection (scales with model params to avoid OOM) ─────────────────
 
 def _pick_best_quant(hw: HardwareProfile, model_params_b: float) -> str:
     """
     Pick highest quality quantization that actually FITS in available VRAM.
 
-    Fix 1 from plan review: quant selection must be model-param-aware.
-    Don't just check VRAM threshold — check if the specific model fits at that quant.
+    Quant selection is model-param-aware: don't just check VRAM threshold —
+    compute actual memory footprint at each quant level for the given model.
     """
     eff_vram = getattr(hw, "effective_vram_gb", 0) or 0
     eff_ram = getattr(hw, "effective_ram_gb", hw.ram_available_gb)
@@ -173,7 +173,7 @@ def _download_huggingface(
 
     Returns path to downloaded GGUF file, or None on failure.
     """
-    # Security: validate repo_id (Fix from plan review)
+    # Security: validate repo_id before passing to subprocess
     if not _HF_REPO_PATTERN.match(repo_id):
         logger.error("Invalid HF repo_id rejected: %r", repo_id)
         return None
@@ -285,7 +285,7 @@ def acquire_model(
     Priority:
     1. Already served?  → done
     2. GGUF on disk?    → register (laptop: ollama create; server: llama-server)
-    3. HF cache?        → register or fallback chain (Fix 2)
+    3. HF cache?        → register or safetensors fallback chain
     4. Ollama pull?     → pull from Ollama library
     5. HF download?     → download GGUF + register
     """

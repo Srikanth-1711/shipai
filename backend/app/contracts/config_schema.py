@@ -14,14 +14,14 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, TypeVar
 
 try:
     # Optional dependency in some lightweight test environments.
-    from pydantic import BaseModel, Field, ValidationError, validator  # type: ignore
+    from pydantic import BaseModel, Field, ValidationError, field_validator  # type: ignore
 
     _HAVE_PYDANTIC = True
 except Exception:  # pragma: no cover
     BaseModel = object  # type: ignore
     Field = None  # type: ignore
     ValidationError = Exception  # type: ignore
-    validator = None  # type: ignore
+    field_validator = None  # type: ignore
     _HAVE_PYDANTIC = False
 
 
@@ -67,10 +67,9 @@ if _HAVE_PYDANTIC:
 
         decisions: Dict[str, Dict[str, Any]] = Field(default_factory=dict)  # type: ignore[assignment]
 
-        class Config:  # type: ignore[valid-type]
-            extra = "forbid"
+        model_config = {"extra": "forbid"}
 
-        @validator(
+        @field_validator(
             "template",
             "framework",
             "vector_db",
@@ -79,8 +78,10 @@ if _HAVE_PYDANTIC:
             "pii",
             "cache",
             "infra_tier",
+            mode="before"
         )
-        def _non_empty_and_allowed(cls, v: str, field):  # type: ignore[override]
+        @classmethod
+        def _non_empty_and_allowed(cls, v: Any, info: Any):  # type: ignore[override]
             if not isinstance(v, str) or not v.strip():
                 raise ValueError("must be a non-empty string")
             v = v.strip()
@@ -94,7 +95,7 @@ if _HAVE_PYDANTIC:
                 "cache": CACHES,
                 "infra_tier": INFRA_TIERS,
             }
-            key = field.name
+            key = info.field_name
             if key in allowed_map and v not in allowed_map[key]:
                 raise ValueError(f"invalid option '{v}' for {key}")
             return v
@@ -173,8 +174,8 @@ def validate_config(raw: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List
 
     try:
         cfg = ConfigV1(**raw)  # type: ignore[misc]
-        # pydantic v1 compat
-        data = cfg.dict()
+        # pydantic v2 compat
+        data = cfg.model_dump()
         data["version"] = "1.0"
         return data, []
     except Exception as exc:

@@ -126,10 +126,36 @@ def get_bandwidth(gpu_name: str) -> float:
     return _DEFAULT_BANDWIDTH
 
 
-# ── NVIDIA detection (existing, refined) ─────────────────────────────────────
+# ── NVIDIA detection (Binding first, Text fallback) ──────────────────────────
 
-def _detect_nvidia() -> tuple[str | None, float, float, bool]:
-    """Detect NVIDIA GPU via nvidia-smi. Returns (name, vram_total_gb, vram_free_gb, has_cuda)."""
+def _detect_nvidia_pynvml() -> tuple[str | None, float, float, bool]:
+    """Detect NVIDIA GPU via native pynvml binding. Returns (name, vram_total_gb, vram_free_gb, has_cuda)."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        device_count = pynvml.nvmlDeviceGetCount()
+        if device_count == 0:
+            pynvml.nvmlShutdown()
+            return None, 0.0, 0.0, False
+
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        name = pynvml.nvmlDeviceGetName(handle)
+        if isinstance(name, bytes):
+            name = name.decode("utf-8")
+            
+        mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        total_gb = mem_info.total / 1e9
+        free_gb = mem_info.free / 1e9
+
+        pynvml.nvmlShutdown()
+        return name, round(total_gb, 2), round(free_gb, 2), True
+    except Exception as e:
+        logger.debug("pynvml detection failed: %s", e)
+        return None, 0.0, 0.0, False
+
+
+def _parse_nvidia_smi() -> tuple[str | None, float, float, bool]:
+    """Fallback: Detect NVIDIA GPU via nvidia-smi text parsing."""
     try:
         result = subprocess.run(
             [
@@ -147,10 +173,18 @@ def _detect_nvidia() -> tuple[str | None, float, float, bool]:
                 name = parts[0]
                 total_gb = float(parts[1]) / 1024
                 free_gb = float(parts[2]) / 1024
-                return name, total_gb, free_gb, True
+                return name, round(total_gb, 2), round(free_gb, 2), True
     except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
         pass
     return None, 0.0, 0.0, False
+
+
+def _detect_nvidia() -> tuple[str | None, float, float, bool]:
+    """Primary NVIDIA detection router: tries pynvml, falls back to nvidia-smi."""
+    name, total, free, has_cuda = _detect_nvidia_pynvml()
+    if has_cuda:
+        return name, total, free, has_cuda
+    return _parse_nvidia_smi()
 
 
 # ── AMD detection ────────────────────────────────────────────────────────────
@@ -514,11 +548,11 @@ def detect_hardware_profile() -> HardwareProfile:
             cpu_cores=cpu_logical,
             ram_gb=ram_total_gb,
         )
-        object.__setattr__(profile, "all_gpus", topology.gpus)
-        object.__setattr__(profile, "gpu_count", len(topology.gpus))
-        object.__setattr__(profile, "total_vram_gb", topology.pooled_vram_gb)
-        object.__setattr__(profile, "topology_type", topology.interconnect)
-        object.__setattr__(profile, "scale_tier", topology.scale_tier)
+        profile.all_gpus = topology.gpus
+        profile.gpu_count = len(topology.gpus)
+        profile.total_vram_gb = topology.pooled_vram_gb
+        profile.topology_type = topology.interconnect
+        profile.scale_tier = topology.scale_tier
     except Exception as e:
         logger.debug("Multi-GPU topology detection failed: %s", e)
 
@@ -537,7 +571,7 @@ def enrich_hardware_budget(hw: HardwareProfile) -> HardwareProfile:
     eff_ram = max(hw.ram_available_gb, hw.ram_total_gb * 0.85)
     max_params = eff_vram / 0.6 if eff_vram > 0 else eff_ram / 1.2
 
-    object.__setattr__(hw, "effective_vram_gb", round(eff_vram, 2))
-    object.__setattr__(hw, "effective_ram_gb", round(eff_ram, 2))
-    object.__setattr__(hw, "max_model_params_b", round(max_params, 2))
+    hw.effective_vram_gb = round(eff_vram, 2)
+    hw.effective_ram_gb = round(eff_ram, 2)
+    hw.max_model_params_b = round(max_params, 2)
     return hw

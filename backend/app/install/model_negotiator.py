@@ -1,6 +1,7 @@
 """
-Phase D — Match ShipAI nodes to real installed models (genuine inventory first).
-Matrix scores are estimates until Phase E benchmarks replace them.
+Model negotiator — match discovered models to agent roles using
+hardware-constrained scoring.  Matrix scores are estimates unless
+live benchmarks have been merged (see benchmark_fetcher.py).
 """
 from __future__ import annotations
 
@@ -16,8 +17,16 @@ from app.install.capability_fetcher import (
 from app.install.model_plan import ModelPlan, NodeAssignment, save_model_plan
 from app.install.types import DiscoveredModel, EnvironmentReport, HardwareProfile, LLMRuntime
 
-# Agent graph nodes that need a chat model (not embeddings-only).
-CHAT_NODES = ("interview_node", "research_node", "plan_node", "explain_node")
+# Default chat-model node names — passed in from the application layer.
+# The install module does NOT depend on these names; they are provided as a
+# convenience default.  The application (engine/orchestrator.py, setup/fleet.py)
+# owns the canonical list and should pass it explicitly.
+DEFAULT_CHAT_NODES: tuple[str, ...] = (
+    "interview_node", "research_node", "plan_node", "explain_node",
+)
+# Backward-compat alias (deprecated — callers should use DEFAULT_CHAT_NODES
+# or pass nodes explicitly).
+CHAT_NODES = DEFAULT_CHAT_NODES
 
 UNKNOWN_MODEL_BASELINE = {
     "json_reliable": 0.5,
@@ -181,7 +190,7 @@ class ModelNegotiator:
         reason = (
             "Installed model matched capability matrix"
             if confidence == "installed_verified"
-            else "Installed model not in matrix — run shipai benchmark (Phase E) for genuine scores"
+            else "Installed model not in matrix — run shipai benchmark for genuine scores"
         )
         return NodeAssignment(
             model=item.name,

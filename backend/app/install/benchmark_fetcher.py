@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -335,10 +336,7 @@ def _parse_artificial_analysis_response(data: Any) -> dict[str, BenchmarkScore]:
         key = _normalize_model_key(str(model_id))
         try:
             score_val = float(quality)
-            if not (score_val == score_val) or score_val != score_val:  # NaN check
-                continue
-            import math as _math
-            if not _math.isfinite(score_val):
+            if not math.isfinite(score_val):
                 continue
         except (ValueError, TypeError):
             continue

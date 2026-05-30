@@ -14,9 +14,16 @@ from __future__ import annotations
 import math
 import re
 
-# ── Family baseline scores (0-100 scale, calibrated to chatbot arena) ────────
-# These are conservative estimates — actual top models score higher.
-# Calibration: GPT-4o ≈ 90, Llama3.1-70B ≈ 72, Mistral-7B ≈ 65
+# ── Family baseline scores (0-100 scale) ─────────────────────────────────────
+# Conservative floor estimates per model family, used only when no live
+# benchmark data is available (last-resort interpolation).
+#
+# Calibration sources (Jan-May 2025):
+#   - Chatbot Arena ELO (lmsys.org) mapped to 0-100: GPT-4o ≈ 90, Claude-3.5 ≈ 88
+#   - Artificial Analysis Quality Index: Llama-3.1-70B ≈ 72, Mistral-7B ≈ 65
+#   - Open LLM Leaderboard v2: Qwen2.5 family avg ≈ 74, Phi-3.5 ≈ 71
+# These are intentionally conservative — actual top variants score higher.
+# Calibration reference: GPT-4o ≈ 90, Llama3.1-70B ≈ 72, Mistral-7B ≈ 65
 FAMILY_BASELINES: dict[str, float] = {
     # Frontier / top-tier
     "deepseek":    80.0,

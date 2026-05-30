@@ -52,5 +52,5 @@ def test_config_v1_forbids_extra_fields():
     raw["unexpected"] = "x"
     cfg, errors = validate_config(raw)
     assert cfg is None
-    assert any("extra fields not permitted" in e for e in errors)
+    assert any("Extra inputs are not permitted" in e or "extra fields not permitted" in e for e in errors)
 

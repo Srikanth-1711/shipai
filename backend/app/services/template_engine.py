@@ -350,7 +350,7 @@ class SemanticCacheLayer:
             self._write_file(project_dir / "backend" / "app" / "core" / "cache.py", content)
 
     def inject_infra_module(self, project_dir: Path, value: str):
-        docker_compose = "version: '3.8'\\nservices:\\n"
+        docker_compose = "version: '3.8'\nservices:\n"
         docker_compose += """
   api:
     build: .

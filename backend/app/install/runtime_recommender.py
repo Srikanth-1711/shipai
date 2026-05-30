@@ -96,7 +96,8 @@ def recommend_runtime(
     """
     Produce a concrete RuntimeRecommendation for a given scale + model.
 
-    Applies Fix 3: PCIe multi-GPU prefers single GPU when model fits.
+    PCIe multi-GPU setups prefer single-GPU when the model fits, because
+    PCIe inter-GPU bandwidth is too slow to benefit from tensor parallelism.
     """
     tier = scale.tier
     tp = scale.recommended_tp
@@ -105,7 +106,7 @@ def recommend_runtime(
     if hasattr(hw, 'all_gpus') and hw.all_gpus:
         gpu_ids = [g.index for g in hw.all_gpus]
 
-    # ── Fix 3: PCIe single-GPU preference ───────────────────────────────────
+    # ── PCIe single-GPU preference: avoid slow cross-GPU transfers ─────────
     if (
         scale.interconnect == "pcie_x16" or scale.interconnect == "pcie_x8"
     ) and scale.gpu_count > 1 and model_params_b > 0:

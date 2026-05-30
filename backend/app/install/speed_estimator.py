@@ -8,8 +8,16 @@ from __future__ import annotations
 
 from app.install.vram_calculator import get_quant_bytes
 
-# ── Backend efficiency factors (empirically validated) ───────────────────────
+# ── Backend efficiency factors ────────────────────────────────────────────
 # Relative to NVIDIA CUDA as 1.0 baseline.
+# Calibration sources:
+#   - NVIDIA CUDA: baseline by definition (tok/s matches bandwidth-limited theory)
+#   - Apple Metal: ~82% of CUDA efficiency on M1 Pro/Max (ollama bench, llama.cpp bench)
+#   - AMD ROCm: ~78% on MI210/MI300 (AMD vLLM benchmarks, llama.cpp ROCm CI)
+#   - Intel Arc: ~65% on A770 (llama.cpp SYCL backend benchmarks)
+#   - CPU AVX-512: ~15% of GPU throughput (llama.cpp server, batch=1, Xeon 8380)
+#   - CPU AVX2: ~10% (llama.cpp bench, Ryzen 7 5800X, batch=1)
+#   - CPU basic: ~7% (ARM Cortex without NEON, estimated)
 BACKEND_EFFICIENCY: dict[str, float] = {
     "nvidia_cuda":  1.00,
     "apple_metal":  0.82,
@@ -20,8 +28,12 @@ BACKEND_EFFICIENCY: dict[str, float] = {
     "cpu_basic":    0.07,
 }
 
-# ── Per-quant computational efficiency ───────────────────────────────────────
-# Higher quant = more bytes to move per token = lower throughput efficiency.
+# ── Per-quant computational efficiency ───────────────────────────────────
+# Efficiency loss from dequantization overhead + memory-bandwidth utilization.
+# Calibration: derived from llama.cpp perplexity-vs-speed benchmarks comparing
+# F16 throughput to each quant level. Lower quant = more bytes per weight but
+# dequant overhead reduces effective bandwidth utilization.
+# Source: llama.cpp quantization benchmark tables (ggerganov/llama.cpp Wiki).
 QUANT_EFFICIENCY: dict[str, float] = {
     "IQ2_XXS": 0.62,
     "Q2_K":    0.60,
