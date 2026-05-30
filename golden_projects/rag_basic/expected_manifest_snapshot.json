@@ -1,0 +1,26 @@
+{
+  "manifest_version": "1.0",
+  "config_snapshot": {
+    "version": "1.0",
+    "project_type": "rag_chatbot",
+    "template": "rag_chatbot",
+    "framework": "langchain",
+    "vector_db": "chroma",
+    "search_type": "dense",
+    "reranker": "none",
+    "pii": "none",
+    "cache": "none",
+    "infra_tier": "minimal",
+    "decisions": {}
+  },
+  "generated_files_present": [
+    "Dockerfile",
+    "README.md",
+    "requirements.txt",
+    "backend/app/main.py",
+    "docker-compose.yml",
+    "eval/evaluate.py",
+    "manifest.json"
+  ]
+}
+

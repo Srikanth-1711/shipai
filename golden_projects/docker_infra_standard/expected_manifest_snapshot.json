@@ -1,0 +1,22 @@
+{
+  "manifest_version": "1.0",
+  "config_snapshot": {
+    "version": "1.0",
+    "project_type": "rag_chatbot",
+    "template": "rag_chatbot",
+    "framework": "langchain",
+    "vector_db": "chroma",
+    "search_type": "dense",
+    "reranker": "none",
+    "pii": "none",
+    "cache": "redis",
+    "infra_tier": "standard",
+    "decisions": {}
+  },
+  "generated_files_present": [
+    "docker-compose.yml",
+    "backend/app/core/cache.py",
+    "manifest.json"
+  ]
+}
+

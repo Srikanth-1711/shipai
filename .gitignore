@@ -43,3 +43,13 @@ projects/
 .idea/
 *.swp
 *.swo
+
+# Databases & local files
+*.sqlite
+shipai.db
+test_e2e.py
+_fix_regex.py
+
+# Frontend assets
+frontend/assets/
+knowledge_base/

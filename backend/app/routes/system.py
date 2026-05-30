@@ -7,6 +7,7 @@ from app.services.hardware_checker import check_hardware
 from app.services.ollama_service import ollama_service
 from app.services.infra_generator import get_infra_summary
 from app.config import settings
+from app.runtime.capabilities import summarize_capabilities
 
 router = APIRouter(prefix="/api/system", tags=["System"])
 
@@ -76,3 +77,9 @@ async def get_infrastructure_patterns(tier: str = "pro"):
         "tier": tier,
         "patterns": get_infra_summary(tier),
     }
+
+
+@router.get("/runtime-capabilities")
+async def get_runtime_capability_report():
+    """Report optional/required dependency capabilities for graceful degradation."""
+    return summarize_capabilities()

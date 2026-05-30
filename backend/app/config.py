@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_DEFAULT_MODEL: str = "tinyllama"
+    OLLAMA_DEFAULT_MODEL: str = "qwen2.5:3b"
     OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
     OLLAMA_TIMEOUT: int = 120  # seconds
 
@@ -33,6 +33,11 @@ class Settings(BaseSettings):
 
     # License
     LICENSE_SERVER_URL: Optional[str] = None  # None = offline validation only
+
+    # Gemini API (optional, for model reasoning)
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-flash-latest"
+    GEMINI_ENABLE_REASONING: bool = False  # Enable for explanations
 
     # Paths
     PROJECTS_DIR: str = str(Path.home() / ".shipai" / "projects")

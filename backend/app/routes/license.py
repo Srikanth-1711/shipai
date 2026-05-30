@@ -2,7 +2,7 @@
 ShipAI -- License Routes
 Endpoints for license key management and tier comparison.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from app.services.license_service import (
     generate_license_key,
@@ -51,8 +51,17 @@ async def list_tiers():
 
 
 @router.post("/generate")
-async def generate_key(req: GenerateKeyRequest):
+async def generate_key(req: GenerateKeyRequest, request: Request):
     """Generate a new license key (admin endpoint)."""
+    import os
+    from fastapi import HTTPException
+    
+    admin_secret = os.getenv("SHIPAI_ADMIN_SECRET")
+    auth_header = request.headers.get("Authorization")
+    
+    if not admin_secret or auth_header != f"Bearer {admin_secret}":
+        raise HTTPException(status_code=403, detail="Unauthorized: Admin access required")
+        
     return generate_license_key(
         tier=req.tier,
         email=req.email,

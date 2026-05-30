@@ -11,7 +11,8 @@ from fastapi.responses import FileResponse
 import os
 
 from app.config import settings
-from app.routes import system, models, advisor, templates, license
+from app.routes import system, models, advisor, templates, license, auth, projects, model_suggestions
+from app.runtime.capabilities import summarize_capabilities
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +29,23 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} starting...")
     logger.info(f"📡 Ollama endpoint: {settings.OLLAMA_BASE_URL}")
+    caps = summarize_capabilities()
+    logger.info(
+        "🔧 Runtime capabilities: required_ok=%s optional=%s/%s",
+        caps["required_ok"],
+        caps["optional_available"],
+        caps["optional_total"],
+    )
+
+    # Initialize Database
+    try:
+        from app.core.database import init_db
+        from app.db.feedback_db import init_db as init_feedback_db
+        await init_db()
+        init_feedback_db()
+        logger.info("🗄️  Database initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Database initialization failed: {e}")
 
     # Check Ollama connectivity
     from app.services.ollama_service import ollama_service
@@ -77,6 +95,13 @@ app.include_router(models.router)
 app.include_router(advisor.router)
 app.include_router(templates.router)
 app.include_router(license.router)
+app.include_router(auth.router)
+app.include_router(projects.router)
+app.include_router(model_suggestions.router)
+
+from app.api import ws, feedback
+app.include_router(ws.router)
+app.include_router(feedback.router, prefix="/api")
 
 
 @app.get("/api")
@@ -100,10 +125,20 @@ async def root():
 # Mount Frontend UI for Desktop App
 frontend_dir = os.path.join(os.path.dirname(__file__), "../../frontend")
 if os.path.exists(frontend_dir):
-    app.mount("/css", StaticFiles(directory=os.path.join(frontend_dir, "css")), name="css")
-    app.mount("/js", StaticFiles(directory=os.path.join(frontend_dir, "js")), name="js")
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+    css_dir = os.path.join(frontend_dir, "css")
+    if os.path.exists(css_dir):
+        app.mount("/css", StaticFiles(directory=css_dir), name="css")
+        
+    js_dir = os.path.join(frontend_dir, "js")
+    if os.path.exists(js_dir):
+        app.mount("/js", StaticFiles(directory=js_dir), name="js")
+        
+    assets_dir = os.path.join(frontend_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    @app.get("/")
-    async def serve_index():
-        return FileResponse(os.path.join(frontend_dir, "index.html"))
+    index_path = os.path.join(frontend_dir, "index.html")
+    if os.path.exists(index_path):
+        @app.get("/")
+        async def serve_index():
+            return FileResponse(index_path)
