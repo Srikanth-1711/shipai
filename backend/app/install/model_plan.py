@@ -23,6 +23,10 @@ class NodeAssignment:
     role: str = ""
     gemini_reasoning: str = ""
     user_suggested: bool = False
+    estimated_tps: float = 0.0
+    vram_needed_gb: float = 0.0
+    vram_confidence: str = ""
+    display_output: str = ""
 
 
 @dataclass
@@ -41,6 +45,10 @@ class ModelPlan:
     use_case_profile: Dict[str, Any] = field(default_factory=dict)
     user_suggestions: Dict[str, str] = field(default_factory=dict)
     gemini_enabled: bool = False
+    scale_tier: str = "laptop"
+    recommended_runtime: str = "ollama"
+    deployment_configs: Dict[str, str] = field(default_factory=dict)
+    # e.g. {"docker_compose": "~/.shipai/deployments/docker-compose.yml"}
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

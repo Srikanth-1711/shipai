@@ -24,6 +24,20 @@ class LLMRuntime:
 
 
 @dataclass
+class GPUInfo:
+    """Per-GPU facts — one entry per physical GPU detected."""
+    index: int
+    name: str
+    vram_total_gb: float
+    vram_free_gb: float
+    vendor: str = "nvidia"       # "nvidia" | "amd" | "intel" | "apple"
+    bandwidth_gb_s: float = 0.0
+    has_cuda: bool = False
+    has_rocm: bool = False
+    uuid: str = ""
+
+
+@dataclass
 class HardwareProfile:
     """Measured machine facts only — no recommended model names."""
 
@@ -42,11 +56,22 @@ class HardwareProfile:
     gpu_vram_total_gb: float = 0.0
     gpu_vram_free_gb: float = 0.0
     has_cuda: bool = False
+    has_rocm: bool = False
+    has_metal: bool = False
+    gpu_vendor: str = "none"  # "nvidia" | "amd" | "intel" | "apple" | "none"
+    gpu_bandwidth_gb_s: float = 0.0
+    cpu_features: List[str] = field(default_factory=list)  # ["avx2", "avx512", ...]
     is_apple_silicon: bool = False
     unified_memory_gb: Optional[float] = None
     effective_vram_gb: float = 0.0
     effective_ram_gb: float = 0.0
     max_model_params_b: float = 0.0
+    # ── Multi-GPU fields ──────────────────────────────────────────────────────
+    all_gpus: List[GPUInfo] = field(default_factory=list)
+    gpu_count: int = 0
+    total_vram_gb: float = 0.0      # pooled across all GPUs after parallelism overhead
+    topology_type: str = "none"     # "nvlink" | "pcie_x16" | "pcie_x8" | "none"
+    scale_tier: str = "laptop"      # "laptop"|"workstation"|"multi_gpu"|"server"|"hyperscale"|"cpu_cluster"
 
 
 @dataclass
@@ -69,7 +94,6 @@ class DiscoveredModel:
     def __post_init__(self) -> None:
         if not self.canonical_id:
             from app.install.canonical import normalize_canonical_id
-
             object.__setattr__(self, "canonical_id", normalize_canonical_id(self.name))
         if not self.sources:
             object.__setattr__(self, "sources", [self.source])

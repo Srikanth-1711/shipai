@@ -10,6 +10,7 @@ from app.install.capability_fetcher import get_model_entry
 from app.install.intent_profile import IntentProfile
 from app.install.model_negotiator import CHAT_NODES
 from app.install.model_plan import ModelPlan, NodeAssignment
+from app.install.speed_estimator import format_speed_display
 from app.install.tools.feasibility_filter import FeasibilityResult, is_feasible
 from app.install.tools.web_intelligence import RichModelInfo
 from app.install.types import DiscoveredModel, EnvironmentReport, HardwareProfile
@@ -179,6 +180,22 @@ def assign_roles_from_top3(
     for node, (role, sc) in node_map.items():
         status = "installed" if sc.installed else "needs_download"
         conf = "installed_verified" if sc.installed else "fusion_scored"
+        # Build display output with speed/VRAM info
+        tps = sc.feasibility.estimated_tps if sc.feasibility else 0.0
+        tps_low = getattr(sc.feasibility, "tps_low", tps * 0.8) if sc.feasibility else 0.0
+        tps_high = getattr(sc.feasibility, "tps_high", tps * 1.25) if sc.feasibility else 0.0
+        vram_needed = sc.feasibility.total_vram_needed_gb if sc.feasibility else 0.0
+        vram_conf = getattr(sc.feasibility, "vram_confidence", "medium") if sc.feasibility else ""
+        tps_conf = getattr(sc.feasibility, "tps_confidence", "?") if sc.feasibility else "?"
+        display = format_speed_display(
+            model_id=sc.model.ollama_id,
+            median_tps=tps,
+            low_tps=tps_low,
+            high_tps=tps_high,
+            vram_needed_gb=vram_needed,
+            vram_available_gb=0.0,  # filled by caller if known
+            confidence=tps_conf,
+        )
         assignments[node] = NodeAssignment(
             model=sc.model.ollama_id,
             runtime="ollama",
@@ -187,6 +204,10 @@ def assign_roles_from_top3(
             quality_score=sc.final_score,
             reason=f"Fusion rank - {role} slot for {node}",
             role=role,
+            estimated_tps=round(tps, 1),
+            vram_needed_gb=round(vram_needed, 2),
+            vram_confidence=vram_conf,
+            display_output=display,
         )
     return final_three, assignments
 
