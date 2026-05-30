@@ -1,4 +1,4 @@
-"""Phase B — deep inventory: disk artifacts, cross-linking, readiness flags."""
+"""Deep inventory scanner: disk artifacts, cross-linking, readiness flags."""
 from __future__ import annotations
 
 import os
@@ -289,7 +289,7 @@ def scan_all_artifacts() -> List[DiscoveredModel]:
 
 def build_inventory(runtimes: List[LLMRuntime]) -> List[DiscoveredModel]:
     """
-    Full Phase B inventory: runtime tags + disk artifacts, merged and cross-linked.
+    Build the merged inventory: runtime-tagged models + disk artifacts, cross-linked.
     """
     raw: List[DiscoveredModel] = []
     raw.extend(inventory_from_runtimes(runtimes))

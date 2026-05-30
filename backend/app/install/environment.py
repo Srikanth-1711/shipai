@@ -1,4 +1,4 @@
-"""Assemble full environment report — Phase A entry point."""
+"""Assemble the full environment report (hardware + runtimes + inventory + conflicts)."""
 from __future__ import annotations
 
 import json

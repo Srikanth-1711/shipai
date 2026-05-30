@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from app.install.model_negotiator import (
     negotiate_from_report,
-    CHAT_NODES,
+    DEFAULT_CHAT_NODES,
 )
 from app.install.model_plan import ModelPlan, NodeAssignment
 from app.install.types import EnvironmentReport
@@ -33,11 +33,13 @@ class EnhancedNegotiator:
         matrix: dict[str, Any],
         catalog: List[dict[str, Any]] | None = None,
         use_gemini: bool = False,
+        nodes: tuple[str, ...] | None = None,
     ):
         self.report = report
         self.matrix = matrix
         self.catalog = catalog or []
         self.use_gemini = use_gemini and gemini_service.enabled
+        self.nodes: tuple[str, ...] = tuple(nodes) if nodes else DEFAULT_CHAT_NODES
         self.user_suggestions: Dict[str, str] = {}
 
     def set_user_suggestions(self, suggestions: Dict[str, str]) -> None:
@@ -58,7 +60,9 @@ class EnhancedNegotiator:
         """
 
         # Step 1: Get base deterministic assignment
-        base_result = negotiate_from_report(self.report, self.matrix, self.catalog)
+        base_result = negotiate_from_report(
+            self.report, self.matrix, self.catalog, nodes=self.nodes
+        )
 
         # Step 2: Create initial plan
         plan = ModelPlan(
@@ -89,7 +93,7 @@ class EnhancedNegotiator:
         hw = self.report.hardware
 
         for node, suggested_model in self.user_suggestions.items():
-            if node not in CHAT_NODES and node != "embedding":
+            if node not in self.nodes and node != "embedding":
                 logger.warning(f"Unknown node: {node}")
                 continue
 
@@ -174,6 +178,7 @@ async def negotiate_enhanced(
     catalog: List[dict[str, Any]] | None = None,
     user_suggestions: Dict[str, str] | None = None,
     use_gemini: bool = False,
+    nodes: tuple[str, ...] | None = None,
 ) -> ModelPlan:
     """
     Top-level function for enhanced negotiation with user suggestions + Gemini.
@@ -183,6 +188,7 @@ async def negotiate_enhanced(
         matrix=matrix,
         catalog=catalog,
         use_gemini=use_gemini,
+        nodes=nodes,
     )
 
     if user_suggestions:

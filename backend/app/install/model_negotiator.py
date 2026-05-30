@@ -17,16 +17,13 @@ from app.install.capability_fetcher import (
 from app.install.model_plan import ModelPlan, NodeAssignment, save_model_plan
 from app.install.types import DiscoveredModel, EnvironmentReport, HardwareProfile, LLMRuntime
 
-# Default chat-model node names — passed in from the application layer.
-# The install module does NOT depend on these names; they are provided as a
-# convenience default.  The application (engine/orchestrator.py, setup/fleet.py)
-# owns the canonical list and should pass it explicitly.
+# Default chat-model node names exposed as a convenience for callers that
+# do not have their own list yet.  The install module does NOT depend on
+# these specific names — every public entry point accepts a ``nodes``
+# argument so the application layer owns the canonical list.
 DEFAULT_CHAT_NODES: tuple[str, ...] = (
     "interview_node", "research_node", "plan_node", "explain_node",
 )
-# Backward-compat alias (deprecated — callers should use DEFAULT_CHAT_NODES
-# or pass nodes explicitly).
-CHAT_NODES = DEFAULT_CHAT_NODES
 
 UNKNOWN_MODEL_BASELINE = {
     "json_reliable": 0.5,
@@ -51,10 +48,12 @@ class ModelNegotiator:
         report: EnvironmentReport,
         matrix: dict[str, Any],
         catalog: List[dict[str, Any]] | None = None,
+        nodes: tuple[str, ...] | None = None,
     ):
         self.report = report
         self.matrix = matrix
         self.catalog = catalog or []
+        self.nodes: tuple[str, ...] = tuple(nodes) if nodes else DEFAULT_CHAT_NODES
         self.hw = report.hardware
         self._budget_vram = self._effective_vram()
         self._budget_ram = max(
@@ -267,7 +266,7 @@ class ModelNegotiator:
                 "No local LLM runtime detected. Install Ollama or set OPENAI_API_KEY / GROQ_API_KEY."
             )
 
-        for node in CHAT_NODES:
+        for node in self.nodes:
             installed = self.find_best_installed(node)
             if not installed:
                 installed = self.find_best_installed_relaxed(node)
@@ -317,14 +316,16 @@ def negotiate_from_report(
     report: EnvironmentReport,
     matrix: dict[str, Any],
     catalog: List[dict[str, Any]] | None = None,
+    nodes: tuple[str, ...] | None = None,
 ) -> NegotiationResult:
-    return ModelNegotiator(report, matrix, catalog).negotiate()
+    return ModelNegotiator(report, matrix, catalog, nodes=nodes).negotiate()
 
 
 async def build_and_save_model_plan(
     client=None,
     matrix: dict[str, Any] | None = None,
     catalog: List[dict[str, Any]] | None = None,
+    nodes: tuple[str, ...] | None = None,
 ) -> ModelPlan:
     from app.install.capability_fetcher import fetch_ollama_catalog, get_capability_matrix
     from app.install.environment import build_environment_report
@@ -335,7 +336,7 @@ async def build_and_save_model_plan(
     if catalog is None:
         catalog = await fetch_ollama_catalog(client=client, matrix_fallback=matrix)
 
-    neg = negotiate_from_report(report, matrix, catalog)
+    neg = negotiate_from_report(report, matrix, catalog, nodes=nodes)
     plan = ModelPlan(
         primary_runtime=neg.primary_runtime,
         runtime_base_url=neg.runtime_base_url,

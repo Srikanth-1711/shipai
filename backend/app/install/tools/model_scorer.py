@@ -7,8 +7,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.install.ceo_policy import ceo_boost_for_model, is_banned, load_ceo_policy
 from app.install.capability_fetcher import get_model_entry
-from app.install.intent_profile import IntentProfile
-from app.install.model_negotiator import CHAT_NODES
 from app.install.model_plan import ModelPlan, NodeAssignment
 from app.install.speed_estimator import format_speed_display
 from app.install.tools.feasibility_filter import FeasibilityResult, is_feasible

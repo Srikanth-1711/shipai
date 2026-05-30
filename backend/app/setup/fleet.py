@@ -11,7 +11,7 @@ import httpx
 
 from app.install.fusion_intelligence import run_fusion_intelligence
 from app.install.environment import build_environment_report
-from app.install.model_negotiator import CHAT_NODES
+from app.install.model_negotiator import DEFAULT_CHAT_NODES
 from app.install.model_plan import ModelPlan, save_model_plan
 from app.setup.acquirer import acquire_models
 from app.setup.state import SetupState
@@ -102,7 +102,7 @@ async def validator_step(
 
     installed_nodes = sum(
         1
-        for n in CHAT_NODES
+        for n in DEFAULT_CHAT_NODES
         if n in state.plan.node_assignments
         and state.plan.node_assignments[n].model
         and state.plan.node_assignments[n].status
@@ -110,7 +110,7 @@ async def validator_step(
         and state.plan.node_assignments[n].model
     )
     state.success = state.plan.primary_runtime != "none" and installed_nodes >= 1 and not state.failed_pulls
-    _emit(cb, "Validator", f"{installed_nodes}/{len(CHAT_NODES)} nodes ready")
+    _emit(cb, "Validator", f"{installed_nodes}/{len(DEFAULT_CHAT_NODES)} nodes ready")
 
 
 async def run_setup_fleet(

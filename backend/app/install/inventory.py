@@ -1,4 +1,4 @@
-"""Inventory public API — Phase B implementation in inventory_scanner."""
+"""Public inventory API — implementation lives in inventory_scanner."""
 from app.install.inventory_scanner import (
     build_inventory,
     consolidate_inventory,

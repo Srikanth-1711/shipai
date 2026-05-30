@@ -94,9 +94,9 @@ class DiscoveredModel:
     def __post_init__(self) -> None:
         if not self.canonical_id:
             from app.install.canonical import normalize_canonical_id
-            object.__setattr__(self, "canonical_id", normalize_canonical_id(self.name))
+            self.canonical_id = normalize_canonical_id(self.name)
         if not self.sources:
-            object.__setattr__(self, "sources", [self.source])
+            self.sources = [self.source]
 
 
 @dataclass

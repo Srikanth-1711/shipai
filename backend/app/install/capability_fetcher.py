@@ -1,5 +1,5 @@
 """
-Phase C — Live capability matrix + optional Ollama catalog enrichment.
+Live capability matrix + optional Ollama catalog enrichment.
 Fetches ShipAI intelligence JSON (GitHub or env URL), caches offline, falls back to bundled.
 """
 from __future__ import annotations

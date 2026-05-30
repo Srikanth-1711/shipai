@@ -385,7 +385,7 @@ class TestRuntimeRecommendation:
         hw = _make_hw(has_gpu=False, gpu_vendor="none", effective_vram_gb=0.0,
                       gpu_count=0, total_vram_gb=0.0, is_apple_silicon=False)
         # Manually set all_gpus to empty so recommender sees no GPU
-        object.__setattr__(hw, "all_gpus", [])
+        hw.all_gpus = []
         rec = recommend_runtime(scale, "phi3:mini", hw)
         assert rec.runtime == "llamacpp"
         assert any("--threads" in a for a in rec.launch_args)

@@ -546,14 +546,14 @@ Run `python evaluate.py` to evaluate your RAG pipeline using RAGAS.
         deps.append("ragas")
         deps.append("datasets")
         
-        self._write_file(project_dir / "requirements.txt", "\\n".join(deps))
+        self._write_file(project_dir / "requirements.txt", "\n".join(deps))
 
     def generate_env_example(self, project_dir: Path, config: dict):
-        env = "ENVIRONMENT=development\\n"
+        env = "ENVIRONMENT=development\n"
         if config.get("reranker") == "cohere":
-            env += "COHERE_API_KEY=your_key_here\\n"
+            env += "COHERE_API_KEY=your_key_here\n"
         if config.get("infra_tier") in ["standard", "enterprise"] or config.get("cache") in ["redis", "semantic"]:
-            env += "REDIS_URL=redis://localhost:6379/0\\n"
+            env += "REDIS_URL=redis://localhost:6379/0\n"
         self._write_file(project_dir / ".env.example", env)
 
     def generate_readme(self, project_dir: Path, config: dict):
